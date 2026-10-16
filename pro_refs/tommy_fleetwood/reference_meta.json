@@ -1,0 +1,59 @@
+{
+  "frames": 8,
+  "rows": 1,
+  "cols": 8,
+  "order": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7
+  ],
+  "positionNames": [
+    {
+      "phase": "P01",
+      "displayName": "Address",
+      "chineseName": "瞄准站位"
+    },
+    {
+      "phase": "P03",
+      "displayName": "Takeaway",
+      "chineseName": "起杆中段"
+    },
+    {
+      "phase": "P04",
+      "displayName": "Half Backswing",
+      "chineseName": "半程上杆"
+    },
+    {
+      "phase": "P06",
+      "displayName": "Top",
+      "chineseName": "上杆顶点"
+    },
+    {
+      "phase": "P07",
+      "displayName": "Transition",
+      "chineseName": "转换下杆"
+    },
+    {
+      "phase": "P09",
+      "displayName": "Pre Impact",
+      "chineseName": "击球前"
+    },
+    {
+      "phase": "P10",
+      "displayName": "Impact",
+      "chineseName": "击球瞬间"
+    },
+    {
+      "phase": "P12",
+      "displayName": "Finish",
+      "chineseName": "收势"
+    }
+  ],
+  "sourceMode": "video",
+  "sourceUrl": "local:video:tommy_fleetwood_01m48_02m18.mp4"
+}

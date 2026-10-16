@@ -1,0 +1,161 @@
+{
+  "pose_score": 92.8,
+  "weight": "equal",
+  "frames": {
+    "p1": 144,
+    "p2": 154,
+    "p3": 158,
+    "p4": 160,
+    "p5": 172,
+    "p6": 173,
+    "p7": 174,
+    "p8": 176,
+    "p9": 177,
+    "p10": 187
+  },
+  "positions": {
+    "p1": {
+      "frame": 144,
+      "yaw_deg": 330,
+      "standard": "P1-position-in-golf-address",
+      "score": 96.3,
+      "parameters": {
+        "spine": 98.8,
+        "shoulders": 98.1,
+        "hips": 99.0,
+        "lead_thigh": 97.7,
+        "trail_thigh": 98.5,
+        "lead_shin": 99.5,
+        "trail_shin": 99.8,
+        "shaft": 78.9
+      }
+    },
+    "p2": {
+      "frame": 154,
+      "yaw_deg": 315,
+      "standard": "P2-position-in-golf-takeaway",
+      "score": 93.1,
+      "parameters": {
+        "shaft": 80.3,
+        "lead_upper": 95.7,
+        "trail_upper": 91.2,
+        "lead_forearm": 96.9,
+        "trail_forearm": 97.5,
+        "lead_wrist_shaft": 97.3
+      }
+    },
+    "p3": {
+      "frame": 158,
+      "yaw_deg": 330,
+      "standard": "P3-position-in-golf-halfway-back",
+      "score": 96.8,
+      "parameters": {
+        "lead_upper": 99.3,
+        "lead_forearm": 99.1,
+        "shaft": 98.2,
+        "lead_wrist_shaft": 90.5
+      }
+    },
+    "p4": {
+      "frame": 160,
+      "yaw_deg": 345,
+      "standard": "P4-position-in-golf-top-of-the-backswing",
+      "score": 94.5,
+      "parameters": {
+        "spine": 99.5,
+        "shoulders": 99.6,
+        "hips": 99.0,
+        "shaft": 97.9,
+        "lead_upper": 100.0,
+        "lead_forearm": 85.6,
+        "lead_wrist_shaft": 80.1
+      }
+    },
+    "p5": {
+      "frame": 172,
+      "yaw_deg": 0,
+      "standard": "P5-position-in-golf-early-downswing",
+      "score": 97.9,
+      "parameters": {
+        "hips": 97.7,
+        "lead_thigh": 98.8,
+        "trail_thigh": 99.0,
+        "shaft": 98.2,
+        "lead_upper": 99.4,
+        "trail_upper": 94.4
+      }
+    },
+    "p6": {
+      "frame": 173,
+      "yaw_deg": 345,
+      "standard": "P6-position-in-golf-pre-impact",
+      "score": 65.6,
+      "parameters": {
+        "shaft": 8.9,
+        "hips": 98.4,
+        "shoulders": 95.9,
+        "lead_wrist_shaft": 59.2
+      }
+    },
+    "p7": {
+      "frame": 174,
+      "yaw_deg": 315,
+      "standard": "P7-position-in-golf-impact",
+      "score": 90.5,
+      "parameters": {
+        "spine": 99.9,
+        "shoulders": 98.4,
+        "hips": 98.8,
+        "lead_upper": 95.5,
+        "trail_upper": 98.6,
+        "lead_forearm": 90.7,
+        "trail_forearm": 74.0,
+        "lead_thigh": 99.8,
+        "trail_thigh": 99.1,
+        "lead_shin": 97.6,
+        "trail_shin": 99.8,
+        "shaft": 72.0,
+        "lead_wrist_shaft": 51.9
+      }
+    },
+    "p8": {
+      "frame": 176,
+      "yaw_deg": 345,
+      "standard": "P8-position-in-golf-release",
+      "score": 92.3,
+      "parameters": {
+        "lead_upper": 98.1,
+        "trail_upper": 98.0,
+        "lead_forearm": 82.6,
+        "trail_forearm": 92.2,
+        "shaft": 83.7,
+        "lead_to_trail_wrist": 99.4
+      }
+    },
+    "p9": {
+      "frame": 177,
+      "yaw_deg": 345,
+      "standard": "P9-position-in-golf-finish",
+      "score": 99.3,
+      "parameters": {
+        "lead_upper": 99.2,
+        "lead_forearm": 99.5,
+        "shoulders": 99.6,
+        "hips": 99.1,
+        "lead_thigh": 99.3,
+        "trail_thigh": 99.2
+      }
+    },
+    "p10": {
+      "frame": 187,
+      "yaw_deg": 345,
+      "standard": "P10-position-in-golf-end-of-swing",
+      "score": 96.9,
+      "parameters": {
+        "shoulders": 99.3,
+        "hips": 99.0,
+        "head_to_lead_wrist": 92.3
+      }
+    }
+  }
+}

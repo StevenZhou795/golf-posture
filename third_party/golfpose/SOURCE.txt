@@ -1,0 +1,5 @@
+https://github.com/MingHanLee/GolfPose
+commit 0b749c6df4bb7f060ab42fa3dbd71de91bde17c1
+
+common/model_cross.py, common/rela.py, common/routing_transformer.py and
+common/linearattention.py are unmodified copies. LICENSE is the GolfPose license.

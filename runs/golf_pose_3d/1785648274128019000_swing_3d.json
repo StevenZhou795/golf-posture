@@ -1,0 +1,130 @@
+{
+  "source": "user_swings\\1785648274128019000_swing.mp4",
+  "video": "runs\\golf_pose_3d\\1785648274128019000_swing_3d.avi",
+  "still": "runs\\golf_pose_3d\\1785648274128019000_swing_3d.jpg",
+  "arrays": "runs\\golf_pose_3d\\1785648274128019000_swing_3d.npz",
+  "checkpoint": "golfpose_checkpoints\\golfpose_17+2_33.6_30.5_59.5.bin",
+  "pose_model": "yolo26n-pose.pt",
+  "club_model": "runs\\segment\\golf_club_train\\weights\\best.pt",
+  "frames": 331,
+  "frames_written": 331,
+  "fps": 30.0,
+  "receptive_field": 243,
+  "normalization": {
+    "canvas": [
+      1280,
+      720
+    ],
+    "golfer_fraction": 0.7,
+    "golfer_height_px": 532.13,
+    "center_px": [
+      155.22,
+      883.98
+    ],
+    "scale": 0.94714
+  },
+  "phases": {
+    "address": 144,
+    "top": 160,
+    "impact": 177,
+    "follow_through": 187,
+    "signal": "clubhead"
+  },
+  "lift_window": [
+    144,
+    187
+  ],
+  "club_detected_frames": 270,
+  "mediapipe_wrists_replaced": 0,
+  "interpolated_frames": {
+    "root": 0,
+    "right_hip": 0,
+    "right_knee": 0,
+    "right_foot": 0,
+    "left_hip": 0,
+    "left_knee": 0,
+    "left_foot": 0,
+    "spine": 0,
+    "thorax": 0,
+    "neck_base": 153,
+    "head": 0,
+    "left_shoulder": 0,
+    "left_elbow": 10,
+    "left_wrist": 32,
+    "right_shoulder": 0,
+    "right_elbow": 0,
+    "right_wrist": 29,
+    "shaft": 74,
+    "hosel": 61
+  },
+  "bone_length_3d": {
+    "root-left_hip": {
+      "mean_m": 0.0922,
+      "std_m": 0.0076
+    },
+    "left_hip-left_knee": {
+      "mean_m": 0.3276,
+      "std_m": 0.0333
+    },
+    "left_knee-left_foot": {
+      "mean_m": 0.3735,
+      "std_m": 0.0169
+    },
+    "root-right_hip": {
+      "mean_m": 0.0909,
+      "std_m": 0.0062
+    },
+    "right_hip-right_knee": {
+      "mean_m": 0.3982,
+      "std_m": 0.012
+    },
+    "right_knee-right_foot": {
+      "mean_m": 0.4222,
+      "std_m": 0.0097
+    },
+    "root-spine": {
+      "mean_m": 0.2386,
+      "std_m": 0.0055
+    },
+    "spine-thorax": {
+      "mean_m": 0.2361,
+      "std_m": 0.0055
+    },
+    "thorax-neck_base": {
+      "mean_m": 0.1331,
+      "std_m": 0.0131
+    },
+    "neck_base-head": {
+      "mean_m": 0.1313,
+      "std_m": 0.0144
+    },
+    "thorax-left_shoulder": {
+      "mean_m": 0.1262,
+      "std_m": 0.0094
+    },
+    "left_shoulder-left_elbow": {
+      "mean_m": 0.235,
+      "std_m": 0.0355
+    },
+    "left_elbow-left_wrist": {
+      "mean_m": 0.2427,
+      "std_m": 0.0272
+    },
+    "thorax-right_shoulder": {
+      "mean_m": 0.1315,
+      "std_m": 0.0071
+    },
+    "right_shoulder-right_elbow": {
+      "mean_m": 0.266,
+      "std_m": 0.0278
+    },
+    "right_elbow-right_wrist": {
+      "mean_m": 0.1998,
+      "std_m": 0.0212
+    },
+    "shaft-hosel": {
+      "mean_m": 0.544,
+      "std_m": 0.191
+    }
+  }
+}

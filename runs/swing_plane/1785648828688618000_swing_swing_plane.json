@@ -1,0 +1,880 @@
+{
+  "source": "user_swings\\1785648828688618000_swing.mp4",
+  "video": "runs\\swing_plane\\1785648828688618000_swing_swing_plane.avi",
+  "still": "runs\\swing_plane\\1785648828688618000_swing_swing_plane.jpg",
+  "phases_chart": "runs\\swing_plane\\1785648828688618000_swing_phases.png",
+  "club_model": "runs\\segment\\golf_club_train\\weights\\best.pt",
+  "pose_model": "yolo26n-pose.pt",
+  "frames": 66,
+  "frames_written": 66,
+  "phases": {
+    "address": 11,
+    "top": 27,
+    "impact": 44,
+    "follow_through": 54,
+    "signal": "clubhead"
+  },
+  "p4_face": {
+    "frame": 26,
+    "clubhead": [
+      7.17,
+      565.75
+    ],
+    "from_shaft_deg": null,
+    "from_horizontal_deg": null,
+    "confidence": null
+  },
+  "p7_face": {
+    "frame": 41,
+    "clubhead": [
+      410.23,
+      1039.35
+    ],
+    "from_shaft_deg": -41.2,
+    "from_horizontal_deg": -86.4,
+    "confidence": 1.9
+  },
+  "mediapipe_wrists": false,
+  "mediapipe_wrists_replaced": 0,
+  "samples": [
+    {
+      "frame": 0,
+      "confidence": 0.9274,
+      "linked": false,
+      "grip": [
+        221.68,
+        890.98
+      ],
+      "clubhead": [
+        464.44,
+        1092.3
+      ],
+      "face_from_shaft_deg": null,
+      "face_from_horizontal_deg": null,
+      "face_confidence": null
+    },
+    {
+      "frame": 1,
+      "confidence": 0.9333,
+      "linked": true,
+      "grip": [
+        222.13,
+        891.29
+      ],
+      "clubhead": [
+        464.93,
+        1092.16
+      ],
+      "face_from_shaft_deg": null,
+      "face_from_horizontal_deg": null,
+      "face_confidence": null
+    },
+    {
+      "frame": 2,
+      "confidence": 0.9356,
+      "linked": true,
+      "grip": [
+        222.32,
+        890.59
+      ],
+      "clubhead": [
+        465.36,
+        1091.76
+      ],
+      "face_from_shaft_deg": null,
+      "face_from_horizontal_deg": null,
+      "face_confidence": null
+    },
+    {
+      "frame": 3,
+      "confidence": 0.9386,
+      "linked": true,
+      "grip": [
+        222.89,
+        890.64
+      ],
+      "clubhead": [
+        465.61,
+        1091.5
+      ],
+      "face_from_shaft_deg": 14.4,
+      "face_from_horizontal_deg": -36.0,
+      "face_confidence": 1.81
+    },
+    {
+      "frame": 4,
+      "confidence": 0.9386,
+      "linked": true,
+      "grip": [
+        223.09,
+        890.6
+      ],
+      "clubhead": [
+        465.92,
+        1091.15
+      ],
+      "face_from_shaft_deg": null,
+      "face_from_horizontal_deg": null,
+      "face_confidence": null
+    },
+    {
+      "frame": 5,
+      "confidence": 0.9397,
+      "linked": true,
+      "grip": [
+        224.73,
+        891.14
+      ],
+      "clubhead": [
+        465.65,
+        1091.43
+      ],
+      "face_from_shaft_deg": null,
+      "face_from_horizontal_deg": null,
+      "face_confidence": null
+    },
+    {
+      "frame": 6,
+      "confidence": 0.9384,
+      "linked": true,
+      "grip": [
+        225.15,
+        891.34
+      ],
+      "clubhead": [
+        466.33,
+        1090.65
+      ],
+      "face_from_shaft_deg": 14.6,
+      "face_from_horizontal_deg": -35.8,
+      "face_confidence": 1.99
+    },
+    {
+      "frame": 7,
+      "confidence": 0.9348,
+      "linked": true,
+      "grip": [
+        224.75,
+        892.01
+      ],
+      "clubhead": [
+        466.77,
+        1090.86
+      ],
+      "face_from_shaft_deg": 14.6,
+      "face_from_horizontal_deg": -36.1,
+      "face_confidence": 1.67
+    },
+    {
+      "frame": 8,
+      "confidence": 0.9287,
+      "linked": true,
+      "grip": [
+        223.77,
+        890.81
+      ],
+      "clubhead": [
+        466.64,
+        1093.18
+      ],
+      "face_from_shaft_deg": null,
+      "face_from_horizontal_deg": null,
+      "face_confidence": null
+    },
+    {
+      "frame": 9,
+      "confidence": 0.9193,
+      "linked": true,
+      "grip": [
+        223.07,
+        891.71
+      ],
+      "clubhead": [
+        465.85,
+        1096.83
+      ],
+      "face_from_shaft_deg": null,
+      "face_from_horizontal_deg": null,
+      "face_confidence": null
+    },
+    {
+      "frame": 10,
+      "confidence": 0.9024,
+      "linked": true,
+      "grip": [
+        232.75,
+        898.98
+      ],
+      "clubhead": [
+        462.23,
+        1106.72
+      ],
+      "face_from_shaft_deg": null,
+      "face_from_horizontal_deg": null,
+      "face_confidence": null
+    },
+    {
+      "frame": 11,
+      "confidence": 0.928,
+      "linked": true,
+      "grip": [
+        231.04,
+        904.23
+      ],
+      "clubhead": [
+        462.33,
+        1117.76
+      ],
+      "face_from_shaft_deg": null,
+      "face_from_horizontal_deg": null,
+      "face_confidence": null
+    },
+    {
+      "frame": 12,
+      "confidence": 0.897,
+      "linked": true,
+      "grip": [
+        231.78,
+        908.88
+      ],
+      "clubhead": [
+        454.47,
+        1132.46
+      ],
+      "face_from_shaft_deg": null,
+      "face_from_horizontal_deg": null,
+      "face_confidence": null
+    },
+    {
+      "frame": 13,
+      "confidence": 0.9195,
+      "linked": true,
+      "grip": [
+        228.71,
+        912.85
+      ],
+      "clubhead": [
+        442.8,
+        1149.64
+      ],
+      "face_from_shaft_deg": null,
+      "face_from_horizontal_deg": null,
+      "face_confidence": null
+    },
+    {
+      "frame": 14,
+      "confidence": 0.9521,
+      "linked": true,
+      "grip": [
+        224.96,
+        919.85
+      ],
+      "clubhead": [
+        419.09,
+        1166.62
+      ],
+      "face_from_shaft_deg": null,
+      "face_from_horizontal_deg": null,
+      "face_confidence": null
+    },
+    {
+      "frame": 15,
+      "confidence": 0.8532,
+      "linked": true,
+      "grip": [
+        213.63,
+        922.06
+      ],
+      "clubhead": [
+        385.96,
+        1184.3
+      ],
+      "face_from_shaft_deg": null,
+      "face_from_horizontal_deg": null,
+      "face_confidence": null
+    },
+    {
+      "frame": 16,
+      "confidence": 0.9138,
+      "linked": true,
+      "grip": [
+        203.91,
+        931.31
+      ],
+      "clubhead": [
+        325.87,
+        1193.05
+      ],
+      "face_from_shaft_deg": 17.0,
+      "face_from_horizontal_deg": -4.4,
+      "face_confidence": 2.22
+    },
+    {
+      "frame": 19,
+      "confidence": 0.5079,
+      "linked": true,
+      "grip": [
+        56.33,
+        935.17
+      ],
+      "clubhead": [
+        2.36,
+        968.33
+      ],
+      "face_from_shaft_deg": null,
+      "face_from_horizontal_deg": null,
+      "face_confidence": null
+    },
+    {
+      "frame": 20,
+      "confidence": 0.3269,
+      "linked": true,
+      "grip": [
+        51.06,
+        886.5
+      ],
+      "clubhead": [
+        1.37,
+        896.29
+      ],
+      "face_from_shaft_deg": null,
+      "face_from_horizontal_deg": null,
+      "face_confidence": null
+    },
+    {
+      "frame": 21,
+      "confidence": 0.4752,
+      "linked": true,
+      "grip": null,
+      "clubhead": [
+        22.77,
+        835.18
+      ],
+      "face_from_shaft_deg": null,
+      "face_from_horizontal_deg": null,
+      "face_confidence": null
+    },
+    {
+      "frame": 22,
+      "confidence": 0.4232,
+      "linked": true,
+      "grip": [
+        80.21,
+        797.6
+      ],
+      "clubhead": [
+        6.35,
+        777.41
+      ],
+      "face_from_shaft_deg": null,
+      "face_from_horizontal_deg": null,
+      "face_confidence": null
+    },
+    {
+      "frame": 23,
+      "confidence": 0.8144,
+      "linked": true,
+      "grip": [
+        69.29,
+        771.05
+      ],
+      "clubhead": [
+        3.89,
+        728.52
+      ],
+      "face_from_shaft_deg": null,
+      "face_from_horizontal_deg": null,
+      "face_confidence": null
+    },
+    {
+      "frame": 24,
+      "confidence": 0.8054,
+      "linked": true,
+      "grip": [
+        64.41,
+        740.29
+      ],
+      "clubhead": [
+        0.57,
+        679.57
+      ],
+      "face_from_shaft_deg": null,
+      "face_from_horizontal_deg": null,
+      "face_confidence": null
+    },
+    {
+      "frame": 25,
+      "confidence": 0.6219,
+      "linked": true,
+      "grip": [
+        53.89,
+        703.52
+      ],
+      "clubhead": [
+        2.84,
+        626.71
+      ],
+      "face_from_shaft_deg": null,
+      "face_from_horizontal_deg": null,
+      "face_confidence": null
+    },
+    {
+      "frame": 26,
+      "confidence": 0.6761,
+      "linked": true,
+      "grip": [
+        58.16,
+        678.16
+      ],
+      "clubhead": [
+        7.17,
+        565.75
+      ],
+      "face_from_shaft_deg": null,
+      "face_from_horizontal_deg": null,
+      "face_confidence": null
+    },
+    {
+      "frame": 29,
+      "confidence": 0.6681,
+      "linked": true,
+      "grip": [
+        92.05,
+        607.84
+      ],
+      "clubhead": [
+        171.96,
+        539.74
+      ],
+      "face_from_shaft_deg": null,
+      "face_from_horizontal_deg": null,
+      "face_confidence": null
+    },
+    {
+      "frame": 30,
+      "confidence": 0.4448,
+      "linked": true,
+      "grip": null,
+      "clubhead": [
+        170.86,
+        580.9
+      ],
+      "face_from_shaft_deg": null,
+      "face_from_horizontal_deg": null,
+      "face_confidence": null
+    },
+    {
+      "frame": 35,
+      "confidence": 0.4009,
+      "linked": true,
+      "grip": [
+        84.59,
+        637.94
+      ],
+      "clubhead": [
+        132.84,
+        556.13
+      ],
+      "face_from_shaft_deg": null,
+      "face_from_horizontal_deg": null,
+      "face_confidence": null
+    },
+    {
+      "frame": 36,
+      "confidence": 0.4378,
+      "linked": true,
+      "grip": [
+        84.41,
+        656.54
+      ],
+      "clubhead": [
+        80.79,
+        530.65
+      ],
+      "face_from_shaft_deg": null,
+      "face_from_horizontal_deg": null,
+      "face_confidence": null
+    },
+    {
+      "frame": 37,
+      "confidence": 0.9442,
+      "linked": true,
+      "grip": [
+        101.09,
+        693.11
+      ],
+      "clubhead": [
+        31.47,
+        557.33
+      ],
+      "face_from_shaft_deg": null,
+      "face_from_horizontal_deg": null,
+      "face_confidence": null
+    },
+    {
+      "frame": 38,
+      "confidence": 0.912,
+      "linked": true,
+      "grip": [
+        115.71,
+        726.47
+      ],
+      "clubhead": [
+        13.2,
+        610.92
+      ],
+      "face_from_shaft_deg": null,
+      "face_from_horizontal_deg": null,
+      "face_confidence": null
+    },
+    {
+      "frame": 39,
+      "confidence": 0.4054,
+      "linked": true,
+      "grip": null,
+      "clubhead": [
+        32.19,
+        731.05
+      ],
+      "face_from_shaft_deg": null,
+      "face_from_horizontal_deg": null,
+      "face_confidence": null
+    },
+    {
+      "frame": 40,
+      "confidence": 0.8951,
+      "linked": true,
+      "grip": [
+        259.46,
+        879.5
+      ],
+      "clubhead": [
+        253.5,
+        986.65
+      ],
+      "face_from_shaft_deg": null,
+      "face_from_horizontal_deg": null,
+      "face_confidence": null
+    },
+    {
+      "frame": 41,
+      "confidence": 0.8613,
+      "linked": true,
+      "grip": [
+        260.19,
+        858.63
+      ],
+      "clubhead": [
+        410.23,
+        1039.35
+      ],
+      "face_from_shaft_deg": -41.2,
+      "face_from_horizontal_deg": -86.4,
+      "face_confidence": 1.9
+    },
+    {
+      "frame": 42,
+      "confidence": 0.9531,
+      "linked": true,
+      "grip": [
+        226.41,
+        813.67
+      ],
+      "clubhead": [
+        385.43,
+        935.86
+      ],
+      "face_from_shaft_deg": null,
+      "face_from_horizontal_deg": null,
+      "face_confidence": null
+    },
+    {
+      "frame": 45,
+      "confidence": 0.9092,
+      "linked": true,
+      "grip": [
+        106.38,
+        649.53
+      ],
+      "clubhead": [
+        16.14,
+        537.66
+      ],
+      "face_from_shaft_deg": null,
+      "face_from_horizontal_deg": null,
+      "face_confidence": null
+    },
+    {
+      "frame": 46,
+      "confidence": 0.7826,
+      "linked": true,
+      "grip": [
+        91.54,
+        625.77
+      ],
+      "clubhead": [
+        6.88,
+        527.48
+      ],
+      "face_from_shaft_deg": null,
+      "face_from_horizontal_deg": null,
+      "face_confidence": null
+    },
+    {
+      "frame": 47,
+      "confidence": 0.477,
+      "linked": true,
+      "grip": [
+        85.8,
+        606.12
+      ],
+      "clubhead": [
+        1.94,
+        519.24
+      ],
+      "face_from_shaft_deg": null,
+      "face_from_horizontal_deg": null,
+      "face_confidence": null
+    },
+    {
+      "frame": 48,
+      "confidence": 0.7245,
+      "linked": true,
+      "grip": [
+        96.56,
+        606.11
+      ],
+      "clubhead": [
+        -2.23,
+        505.2
+      ],
+      "face_from_shaft_deg": null,
+      "face_from_horizontal_deg": null,
+      "face_confidence": null
+    },
+    {
+      "frame": 52,
+      "confidence": 0.9715,
+      "linked": true,
+      "grip": [
+        224.49,
+        639.27
+      ],
+      "clubhead": [
+        343.58,
+        720.26
+      ],
+      "face_from_shaft_deg": null,
+      "face_from_horizontal_deg": null,
+      "face_confidence": null
+    },
+    {
+      "frame": 53,
+      "confidence": 0.9552,
+      "linked": true,
+      "grip": [
+        223.57,
+        640.43
+      ],
+      "clubhead": [
+        368.22,
+        742.13
+      ],
+      "face_from_shaft_deg": null,
+      "face_from_horizontal_deg": null,
+      "face_confidence": null
+    },
+    {
+      "frame": 54,
+      "confidence": 0.9535,
+      "linked": true,
+      "grip": [
+        223.38,
+        642.05
+      ],
+      "clubhead": [
+        387.21,
+        756.08
+      ],
+      "face_from_shaft_deg": null,
+      "face_from_horizontal_deg": null,
+      "face_confidence": null
+    },
+    {
+      "frame": 55,
+      "confidence": 0.9651,
+      "linked": true,
+      "grip": [
+        222.39,
+        643.04
+      ],
+      "clubhead": [
+        399.81,
+        758.84
+      ],
+      "face_from_shaft_deg": null,
+      "face_from_horizontal_deg": null,
+      "face_confidence": null
+    },
+    {
+      "frame": 56,
+      "confidence": 0.9531,
+      "linked": true,
+      "grip": [
+        220.66,
+        641.83
+      ],
+      "clubhead": [
+        409.0,
+        758.1
+      ],
+      "face_from_shaft_deg": null,
+      "face_from_horizontal_deg": null,
+      "face_confidence": null
+    },
+    {
+      "frame": 57,
+      "confidence": 0.9526,
+      "linked": true,
+      "grip": [
+        221.09,
+        639.03
+      ],
+      "clubhead": [
+        412.84,
+        756.02
+      ],
+      "face_from_shaft_deg": null,
+      "face_from_horizontal_deg": null,
+      "face_confidence": null
+    },
+    {
+      "frame": 58,
+      "confidence": 0.9578,
+      "linked": true,
+      "grip": [
+        220.97,
+        637.66
+      ],
+      "clubhead": [
+        418.55,
+        750.41
+      ],
+      "face_from_shaft_deg": null,
+      "face_from_horizontal_deg": null,
+      "face_confidence": null
+    },
+    {
+      "frame": 59,
+      "confidence": 0.9646,
+      "linked": true,
+      "grip": [
+        223.17,
+        635.78
+      ],
+      "clubhead": [
+        423.46,
+        743.63
+      ],
+      "face_from_shaft_deg": null,
+      "face_from_horizontal_deg": null,
+      "face_confidence": null
+    },
+    {
+      "frame": 60,
+      "confidence": 0.9615,
+      "linked": true,
+      "grip": [
+        222.59,
+        634.66
+      ],
+      "clubhead": [
+        426.88,
+        735.1
+      ],
+      "face_from_shaft_deg": null,
+      "face_from_horizontal_deg": null,
+      "face_confidence": null
+    },
+    {
+      "frame": 61,
+      "confidence": 0.9612,
+      "linked": true,
+      "grip": [
+        221.5,
+        631.84
+      ],
+      "clubhead": [
+        427.49,
+        730.57
+      ],
+      "face_from_shaft_deg": null,
+      "face_from_horizontal_deg": null,
+      "face_confidence": null
+    },
+    {
+      "frame": 62,
+      "confidence": 0.9579,
+      "linked": true,
+      "grip": [
+        221.21,
+        629.55
+      ],
+      "clubhead": [
+        427.0,
+        727.04
+      ],
+      "face_from_shaft_deg": null,
+      "face_from_horizontal_deg": null,
+      "face_confidence": null
+    },
+    {
+      "frame": 63,
+      "confidence": 0.9604,
+      "linked": true,
+      "grip": [
+        220.98,
+        629.16
+      ],
+      "clubhead": [
+        426.09,
+        722.25
+      ],
+      "face_from_shaft_deg": null,
+      "face_from_horizontal_deg": null,
+      "face_confidence": null
+    },
+    {
+      "frame": 64,
+      "confidence": 0.9562,
+      "linked": true,
+      "grip": [
+        221.25,
+        628.34
+      ],
+      "clubhead": [
+        423.76,
+        720.43
+      ],
+      "face_from_shaft_deg": null,
+      "face_from_horizontal_deg": null,
+      "face_confidence": null
+    },
+    {
+      "frame": 65,
+      "confidence": 0.9529,
+      "linked": true,
+      "grip": [
+        220.78,
+        627.74
+      ],
+      "clubhead": [
+        421.03,
+        719.08
+      ],
+      "face_from_shaft_deg": null,
+      "face_from_horizontal_deg": null,
+      "face_confidence": null
+    }
+  ]
+}

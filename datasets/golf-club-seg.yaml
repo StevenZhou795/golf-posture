@@ -1,0 +1,8 @@
+# Golf-club instance segmentation dataset
+# Format: https://docs.ultralytics.com/datasets/segment
+# Polygons were drafted by YOLOE-26n with the text prompt 'golf club'.
+path: E:/Golf_Posture/datasets/golf-club-seg
+train: images/train
+val: images/val
+names:
+  0: golf club

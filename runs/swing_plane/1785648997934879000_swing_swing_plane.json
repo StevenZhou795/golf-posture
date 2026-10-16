@@ -1,0 +1,681 @@
+{
+  "source": "user_swings\\1785648997934879000_swing.mp4",
+  "video": "runs\\swing_plane\\1785648997934879000_swing_swing_plane.avi",
+  "still": "runs\\swing_plane\\1785648997934879000_swing_swing_plane.jpg",
+  "phases_chart": "runs\\swing_plane\\1785648997934879000_swing_phases.png",
+  "club_model": "runs\\segment\\golf_club_train\\weights\\best.pt",
+  "pose_model": "yolo26n-pose.pt",
+  "frames": 67,
+  "frames_written": 67,
+  "phases": {
+    "address": 10,
+    "top": 48,
+    "impact": 52,
+    "follow_through": 56,
+    "signal": "clubhead"
+  },
+  "mediapipe_wrists": false,
+  "mediapipe_wrists_replaced": 0,
+  "samples": [
+    {
+      "frame": 0,
+      "confidence": 0.934,
+      "linked": false,
+      "grip": [
+        231.0,
+        393.13
+      ],
+      "clubhead": [
+        402.74,
+        545.16
+      ]
+    },
+    {
+      "frame": 1,
+      "confidence": 0.9338,
+      "linked": true,
+      "grip": [
+        231.23,
+        392.06
+      ],
+      "clubhead": [
+        402.38,
+        545.57
+      ]
+    },
+    {
+      "frame": 2,
+      "confidence": 0.9342,
+      "linked": true,
+      "grip": [
+        231.55,
+        391.48
+      ],
+      "clubhead": [
+        402.17,
+        545.81
+      ]
+    },
+    {
+      "frame": 3,
+      "confidence": 0.9309,
+      "linked": true,
+      "grip": [
+        232.43,
+        392.04
+      ],
+      "clubhead": [
+        402.76,
+        545.15
+      ]
+    },
+    {
+      "frame": 4,
+      "confidence": 0.9285,
+      "linked": true,
+      "grip": [
+        232.93,
+        392.64
+      ],
+      "clubhead": [
+        402.62,
+        544.5
+      ]
+    },
+    {
+      "frame": 5,
+      "confidence": 0.9302,
+      "linked": true,
+      "grip": [
+        233.73,
+        392.07
+      ],
+      "clubhead": [
+        402.69,
+        545.01
+      ]
+    },
+    {
+      "frame": 6,
+      "confidence": 0.9313,
+      "linked": true,
+      "grip": [
+        233.89,
+        391.99
+      ],
+      "clubhead": [
+        402.71,
+        545.16
+      ]
+    },
+    {
+      "frame": 7,
+      "confidence": 0.9324,
+      "linked": true,
+      "grip": [
+        234.34,
+        390.82
+      ],
+      "clubhead": [
+        402.24,
+        545.72
+      ]
+    },
+    {
+      "frame": 8,
+      "confidence": 0.9384,
+      "linked": true,
+      "grip": [
+        234.19,
+        390.79
+      ],
+      "clubhead": [
+        401.95,
+        546.05
+      ]
+    },
+    {
+      "frame": 9,
+      "confidence": 0.9352,
+      "linked": true,
+      "grip": [
+        233.59,
+        392.1
+      ],
+      "clubhead": [
+        401.96,
+        546.04
+      ]
+    },
+    {
+      "frame": 10,
+      "confidence": 0.9052,
+      "linked": true,
+      "grip": [
+        232.74,
+        392.43
+      ],
+      "clubhead": [
+        401.72,
+        548.41
+      ]
+    },
+    {
+      "frame": 11,
+      "confidence": 0.897,
+      "linked": true,
+      "grip": [
+        231.93,
+        393.1
+      ],
+      "clubhead": [
+        404.09,
+        559.6
+      ]
+    },
+    {
+      "frame": 12,
+      "confidence": 0.928,
+      "linked": true,
+      "grip": [
+        231.05,
+        394.7
+      ],
+      "clubhead": [
+        402.42,
+        569.41
+      ]
+    },
+    {
+      "frame": 13,
+      "confidence": 0.8518,
+      "linked": true,
+      "grip": [
+        228.16,
+        397.2
+      ],
+      "clubhead": [
+        399.66,
+        583.56
+      ]
+    },
+    {
+      "frame": 14,
+      "confidence": 0.7477,
+      "linked": true,
+      "grip": [
+        224.16,
+        402.15
+      ],
+      "clubhead": [
+        396.01,
+        606.75
+      ]
+    },
+    {
+      "frame": 15,
+      "confidence": 0.7375,
+      "linked": true,
+      "grip": [
+        240.37,
+        440.06
+      ],
+      "clubhead": [
+        397.46,
+        648.9
+      ]
+    },
+    {
+      "frame": 16,
+      "confidence": 0.6573,
+      "linked": true,
+      "grip": [
+        247.32,
+        486.81
+      ],
+      "clubhead": [
+        378.19,
+        675.3
+      ]
+    },
+    {
+      "frame": 17,
+      "confidence": 0.4131,
+      "linked": true,
+      "grip": [
+        212.74,
+        444.39
+      ],
+      "clubhead": [
+        310.38,
+        671.97
+      ]
+    },
+    {
+      "frame": 24,
+      "confidence": 0.9364,
+      "linked": false,
+      "grip": [
+        59.3,
+        254.64
+      ],
+      "clubhead": [
+        -1.67,
+        204.02
+      ]
+    },
+    {
+      "frame": 25,
+      "confidence": 0.8486,
+      "linked": true,
+      "grip": [
+        52.76,
+        227.8
+      ],
+      "clubhead": [
+        -0.58,
+        170.87
+      ]
+    },
+    {
+      "frame": 26,
+      "confidence": 0.9616,
+      "linked": true,
+      "grip": [
+        48.83,
+        194.59
+      ],
+      "clubhead": [
+        0.98,
+        125.79
+      ]
+    },
+    {
+      "frame": 27,
+      "confidence": 0.9031,
+      "linked": true,
+      "grip": [
+        50.8,
+        164.8
+      ],
+      "clubhead": [
+        6.4,
+        69.31
+      ]
+    },
+    {
+      "frame": 29,
+      "confidence": 0.6492,
+      "linked": true,
+      "grip": [
+        66.95,
+        102.93
+      ],
+      "clubhead": [
+        118.87,
+        3.74
+      ]
+    },
+    {
+      "frame": 30,
+      "confidence": 0.9156,
+      "linked": true,
+      "grip": [
+        80.11,
+        99.11
+      ],
+      "clubhead": [
+        155.6,
+        27.3
+      ]
+    },
+    {
+      "frame": 31,
+      "confidence": 0.4599,
+      "linked": true,
+      "grip": [
+        93.23,
+        96.99
+      ],
+      "clubhead": [
+        193.21,
+        57.52
+      ]
+    },
+    {
+      "frame": 32,
+      "confidence": 0.5336,
+      "linked": true,
+      "grip": [
+        111.84,
+        100.34
+      ],
+      "clubhead": [
+        221.09,
+        91.93
+      ]
+    },
+    {
+      "frame": 35,
+      "confidence": 0.7789,
+      "linked": true,
+      "grip": [
+        97.09,
+        109.99
+      ],
+      "clubhead": [
+        206.98,
+        96.87
+      ]
+    },
+    {
+      "frame": 36,
+      "confidence": 0.852,
+      "linked": true,
+      "grip": [
+        84.62,
+        118.86
+      ],
+      "clubhead": [
+        163.46,
+        61.6
+      ]
+    },
+    {
+      "frame": 37,
+      "confidence": 0.5333,
+      "linked": true,
+      "grip": [
+        77.72,
+        141.64
+      ],
+      "clubhead": [
+        88.43,
+        27.36
+      ]
+    },
+    {
+      "frame": 38,
+      "confidence": 0.6676,
+      "linked": true,
+      "grip": [
+        94.4,
+        179.88
+      ],
+      "clubhead": [
+        32.41,
+        51.51
+      ]
+    },
+    {
+      "frame": 39,
+      "confidence": 0.628,
+      "linked": true,
+      "grip": [
+        115.86,
+        225.29
+      ],
+      "clubhead": [
+        13.64,
+        98.02
+      ]
+    },
+    {
+      "frame": 45,
+      "confidence": 0.8328,
+      "linked": true,
+      "grip": null,
+      "clubhead": [
+        93.52,
+        105.0
+      ]
+    },
+    {
+      "frame": 46,
+      "confidence": 0.9334,
+      "linked": true,
+      "grip": [
+        98.99,
+        145.11
+      ],
+      "clubhead": [
+        43.3,
+        54.68
+      ]
+    },
+    {
+      "frame": 47,
+      "confidence": 0.943,
+      "linked": true,
+      "grip": [
+        84.2,
+        117.29
+      ],
+      "clubhead": [
+        14.52,
+        27.59
+      ]
+    },
+    {
+      "frame": 48,
+      "confidence": 0.9304,
+      "linked": true,
+      "grip": [
+        66.81,
+        93.41
+      ],
+      "clubhead": [
+        3.78,
+        13.41
+      ]
+    },
+    {
+      "frame": 49,
+      "confidence": 0.6269,
+      "linked": true,
+      "grip": [
+        80.84,
+        95.81
+      ],
+      "clubhead": [
+        11.15,
+        21.76
+      ]
+    },
+    {
+      "frame": 52,
+      "confidence": 0.2806,
+      "linked": true,
+      "grip": [
+        109.64,
+        79.3
+      ],
+      "clubhead": [
+        167.21,
+        103.07
+      ]
+    },
+    {
+      "frame": 53,
+      "confidence": 0.7613,
+      "linked": true,
+      "grip": [
+        189.67,
+        117.55
+      ],
+      "clubhead": [
+        288.16,
+        187.13
+      ]
+    },
+    {
+      "frame": 54,
+      "confidence": 0.9615,
+      "linked": true,
+      "grip": [
+        211.9,
+        131.82
+      ],
+      "clubhead": [
+        348.98,
+        228.05
+      ]
+    },
+    {
+      "frame": 55,
+      "confidence": 0.8984,
+      "linked": true,
+      "grip": [
+        219.37,
+        136.83
+      ],
+      "clubhead": [
+        377.91,
+        248.49
+      ]
+    },
+    {
+      "frame": 56,
+      "confidence": 0.9021,
+      "linked": true,
+      "grip": [
+        218.25,
+        138.11
+      ],
+      "clubhead": [
+        393.96,
+        253.65
+      ]
+    },
+    {
+      "frame": 57,
+      "confidence": 0.9383,
+      "linked": true,
+      "grip": [
+        219.06,
+        138.12
+      ],
+      "clubhead": [
+        401.87,
+        252.42
+      ]
+    },
+    {
+      "frame": 58,
+      "confidence": 0.9477,
+      "linked": true,
+      "grip": [
+        217.19,
+        135.04
+      ],
+      "clubhead": [
+        408.37,
+        249.99
+      ]
+    },
+    {
+      "frame": 59,
+      "confidence": 0.9327,
+      "linked": true,
+      "grip": [
+        214.25,
+        132.21
+      ],
+      "clubhead": [
+        413.19,
+        243.09
+      ]
+    },
+    {
+      "frame": 60,
+      "confidence": 0.9097,
+      "linked": true,
+      "grip": [
+        210.7,
+        129.39
+      ],
+      "clubhead": [
+        416.43,
+        233.66
+      ]
+    },
+    {
+      "frame": 61,
+      "confidence": 0.7819,
+      "linked": true,
+      "grip": [
+        210.04,
+        127.09
+      ],
+      "clubhead": [
+        416.93,
+        226.02
+      ]
+    },
+    {
+      "frame": 62,
+      "confidence": 0.6125,
+      "linked": true,
+      "grip": [
+        212.6,
+        126.61
+      ],
+      "clubhead": [
+        416.89,
+        219.88
+      ]
+    },
+    {
+      "frame": 63,
+      "confidence": 0.6138,
+      "linked": true,
+      "grip": [
+        214.28,
+        125.86
+      ],
+      "clubhead": [
+        416.36,
+        215.27
+      ]
+    },
+    {
+      "frame": 64,
+      "confidence": 0.6043,
+      "linked": true,
+      "grip": [
+        214.02,
+        124.93
+      ],
+      "clubhead": [
+        416.53,
+        213.03
+      ]
+    },
+    {
+      "frame": 65,
+      "confidence": 0.5974,
+      "linked": true,
+      "grip": [
+        212.28,
+        123.74
+      ],
+      "clubhead": [
+        416.75,
+        211.88
+      ]
+    },
+    {
+      "frame": 66,
+      "confidence": 0.601,
+      "linked": true,
+      "grip": [
+        210.35,
+        122.67
+      ],
+      "clubhead": [
+        416.42,
+        210.95
+      ]
+    }
+  ]
+}
