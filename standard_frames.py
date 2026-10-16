@@ -1,7 +1,7 @@
 """Lift the ten standard position sheets into one 3D reference pose each.
 
 Each sheet shows the same position from face-on, down-the-line, and rear.
-The three lifts are aligned to the down-the-line view and averaged.
+The face-on lift is the 3D space. The down-the-line view supplies the side axis.
 
 Usage:
     python standard_frames.py
@@ -230,6 +230,23 @@ def yaw_pose(pose: np.ndarray, degrees: float) -> np.ndarray:
     return turned
 
 
+def camera_side_axis(mirrored: bool, yaw_deg: float) -> np.ndarray:
+    """Down-the-line image horizontal, mapped into the face-on camera."""
+    axis = np.array([[-1.0 if mirrored else 1.0, 0.0, 0.0]])
+    turned = yaw_pose(axis, yaw_deg)[0]
+    length = float(np.linalg.norm(turned))
+    if length < 1e-8:
+        return np.array([0.0, 0.0, 1.0])
+    return turned / length
+
+
+def replace_side(base: np.ndarray, donor: np.ndarray, axis: np.ndarray) -> np.ndarray:
+    """Keep the base pose and copy only the component along axis from the donor."""
+    base_part = base @ axis
+    donor_part = donor @ axis
+    return base + (donor_part - base_part)[:, None] * axis
+
+
 def align_to_anchor(pose: np.ndarray, anchor: np.ndarray) -> tuple[np.ndarray, dict]:
     best_pose = pose
     best_score = -2.0
@@ -250,8 +267,15 @@ def fuse_views(poses: dict[str, np.ndarray | None]) -> dict:
     normalized = {name: normalize_pose(pose) for name, pose in poses.items()}
     available = {name: pose for name, pose in normalized.items() if pose is not None}
     if not available:
-        return {"aligned": {}, "alignment": {}, "agreement": {}, "kept": [], "reference": None}
-    anchor_name = "down_the_line" if "down_the_line" in available else next(iter(available))
+        return {
+            "aligned": {},
+            "alignment": {},
+            "agreement": {},
+            "kept": [],
+            "reference": None,
+            "side_axis": None,
+        }
+    anchor_name = "face_on" if "face_on" in available else next(iter(available))
     aligned = {anchor_name: available[anchor_name]}
     alignment = {anchor_name: {"mirrored": False, "yaw_deg": 0, "cosine": 1.0}}
     for name, pose in available.items():
@@ -269,13 +293,22 @@ def fuse_views(poses: dict[str, np.ndarray | None]) -> dict:
     kept = [name for name in ("face_on", "down_the_line") if name in aligned]
     if not kept:
         kept = list(aligned)
-    reference = None if not kept else np.mean([aligned[name] for name in kept], axis=0)
+    side = None
+    reference = aligned.get("face_on")
+    if reference is not None and "down_the_line" in aligned and anchor_name == "face_on":
+        chosen = alignment["down_the_line"]
+        side = camera_side_axis(chosen["mirrored"], chosen["yaw_deg"])
+        chosen["side_axis"] = [round(float(value), 5) for value in side]
+        reference = replace_side(aligned["face_on"], aligned["down_the_line"], side)
+    elif reference is None:
+        reference = aligned.get("down_the_line")
     return {
         "aligned": aligned,
         "alignment": alignment,
         "agreement": agreement,
         "kept": kept,
         "reference": reference,
+        "side_axis": side,
     }
 
 
@@ -326,6 +359,7 @@ def process_sheet(path: Path, pose_model: YOLO, club_model: YOLO, lifter) -> Non
         "joints": GOLFPOSE_JOINTS,
         "views": views,
         "reference_kept": fused["kept"],
+        "side_axis": None if fused["side_axis"] is None else [round(float(value), 5) for value in fused["side_axis"]],
         "reference_3d": pose_or_none(fused["reference"]),
     }
     (folder / "joints.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
@@ -339,6 +373,67 @@ def process_sheet(path: Path, pose_model: YOLO, club_model: YOLO, lifter) -> Non
         aligned = fused["aligned"].get(view)
         arrays[f"{view}_aligned"] = aligned if aligned is not None else np.full((len(GOLFPOSE_JOINTS), 3), np.nan)
     np.savez(folder / "joints.npz", **arrays)
+
+
+def _finite_pose(pose: np.ndarray) -> np.ndarray | None:
+    if pose is None or not np.isfinite(pose).all():
+        return None
+    return np.asarray(pose, dtype=np.float64)
+
+
+def rebuild_references() -> None:
+    """Rewrite reference_3d from the camera poses already stored in joints.npz."""
+    folders = sorted((path for path in OUTPUT_DIR.iterdir() if path.is_dir()), key=lambda path: sheet_order(path))
+    if not folders:
+        raise SystemExit(f"No position folders in {OUTPUT_DIR}")
+    for folder in folders:
+        npz_path = folder / "joints.npz"
+        json_path = folder / "joints.json"
+        if not npz_path.is_file() or not json_path.is_file():
+            raise SystemExit(f"Missing joints files in {folder}")
+        stored = np.load(npz_path)
+        arrays = {key: stored[key] for key in stored.files}
+        stored.close()
+        poses = {view: _finite_pose(arrays[f"{view}_3d"]) for view in VIEWS}
+        fused = fuse_views(poses)
+        save_still(fused["reference"], folder / "reference_3d.jpg", "reference")
+        summary = json.loads(json_path.read_text(encoding="utf-8"))
+        for view, record in summary["views"].items():
+            record["aligned_3d"] = pose_or_none(fused["aligned"].get(view))
+            record["alignment"] = fused["alignment"].get(view)
+            record["agreement"] = fused["agreement"].get(view)
+            record["kept"] = view in fused["kept"]
+        summary["reference_kept"] = fused["kept"]
+        summary["side_axis"] = (
+            None if fused["side_axis"] is None else [round(float(value), 5) for value in fused["side_axis"]]
+        )
+        summary["reference_3d"] = pose_or_none(fused["reference"])
+        json_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
+        arrays["reference_3d"] = (
+            fused["reference"] if fused["reference"] is not None else np.full((len(GOLFPOSE_JOINTS), 3), np.nan)
+        )
+        for view in VIEWS:
+            aligned = fused["aligned"].get(view)
+            arrays[f"{view}_aligned"] = aligned if aligned is not None else np.full((len(GOLFPOSE_JOINTS), 3), np.nan)
+        np.savez(npz_path, **arrays)
+        face = fused["aligned"].get("face_on")
+        donor = fused["aligned"].get("down_the_line")
+        reference = fused["reference"]
+        side = fused["side_axis"]
+        if face is not None and donor is not None and reference is not None and side is not None:
+            kept = reference - np.outer((reference - face) @ side, side)
+            copied = float(np.max(np.abs((reference - donor) @ side)))
+            picture = float(np.max(np.abs(kept - face)))
+            print(
+                f"{folder.name}: yaw {fused['alignment']['down_the_line']['yaw_deg']} "
+                f"mirror {fused['alignment']['down_the_line']['mirrored']} "
+                f"side {[round(float(value), 3) for value in side]} "
+                f"picture_err {picture:.2e} side_err {copied:.2e}",
+                flush=True,
+            )
+        else:
+            print(f"{folder.name}: reference without a side axis", flush=True)
+    print(f"Saved: {OUTPUT_DIR}", flush=True)
 
 
 def main() -> None:
@@ -357,4 +452,9 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    import sys
+
+    if "--rebuild" in sys.argv[1:]:
+        rebuild_references()
+    else:
+        main()

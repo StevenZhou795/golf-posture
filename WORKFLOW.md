@@ -74,13 +74,13 @@ The 3D clubhead path is the lifted hosel joint over time. It is not a copy of th
 
 Each file in `pro_refs/Standard_10_frames/` is one perfect position shown from three cameras: face-on, down-the-line, and rear. `standard_frames.py` crops the three photos, runs pose and club segmentation on each, and lifts each photo by repeating that single frame.
 
-The down-the-line lift is the anchor. Face-on is rotated about the vertical axis until its bones agree with that anchor. The saved `reference_3d` skeleton is the average of those two. The rear view is kept as its own picture and is not part of the average.
+The face-on lift is the 3D space. Down-the-line is rotated about the vertical axis until its bones agree with that face-on pose. The saved `reference_3d` skeleton keeps the face-on coordinates and replaces only the side axis with the down-the-line measurement. The rear view is kept as its own picture and is not part of the reference.
 
 ### 5. Score a user swing
 
-`compare_standard_frames.py` reads the user’s 3D pose at each P frame and the matching `reference_3d`. Both are centered on the hips and scaled by the spine length. The user pose is rotated in 15-degree steps about the vertical axis, with no mirror, and the closest heading is kept. That removes a difference in camera heading.
+`compare_standard_frames.py` reads the user’s 3D pose at each P frame and the matching `reference_3d`. Both are centered on the hips and scaled by the spine length. The saved picture still turns the user pose about the vertical axis so the two drawings face the same way. The score does not use that turn.
 
-Each checked bone is a unit vector. The score is `(cosine + 1) / 2 * 100`, so a matching direction is 100. A wrist angle, when the checklist asks for one, scores 100 when the two angles match. Every parameter that both sides can supply has the same weight. A missing frame is left out. The face angle is not used here, because the standard sheets do not have one.
+The score compares relative angles: alignment, hip bend, hip depth, knee bend, hands, stance width, flying elbow, trail knee, forward bend, shaft lean, spine tilt, and the lead shoulder, hip, and knee. A matching angle scores 100. A 180° gap scores 0. Every angle that both skeletons can supply has the same weight, at every P frame. A missing joint is left out.
 
 `score_swing.py` is the other comparison. It scores one lifted video against other lifted videos, and it also reports a separate clubhead-path score. That path score is not part of the standard-pose total.
 
@@ -102,7 +102,7 @@ runs/standard_frames/<position>/
   down_the_line_labeled.jpg
   rear_labeled.jpg
   *_3d.jpg                one camera’s lift
-  reference_3d.jpg        face-on and down-the-line average
+  reference_3d.jpg        face-on pose with the down-the-line side axis
   joints.json
   joints.npz              reference_3d and the per-camera joints
 ```
