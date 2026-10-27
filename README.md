@@ -1,3 +1,26 @@
+# Golf posture workflows
+
+Run each stage with one command from `J:\Golf_Posture`:
+
+```powershell
+python workflow.py references
+python workflow.py video pro_refs/b85ed0b4db566e63bce190824c2f2196.mp4
+python workflow.py score
+```
+
+These commands build ten references, identify ten video poses, then score the
+saved poses against the references. Scoring defaults to the latest completed
+reference/video workflows. Use `python workflow.py <stage> --help` for options.
+
+Shared code is in `golf_workflows/`; generated files are in `runs/workflows/`.
+The new entry point defaults to ViTPose-Huge, GolfPose 17+5 and optional club
+refinement enabled for video. The three extra clubhead points remain unmeasured.
+See [WORKFLOW.md](WORKFLOW.md) for output contracts, reviewed-frame overrides,
+cached-run reuse and the exact scoring inputs. Existing model files and earlier
+runs are preserved. The notes below describe earlier experiments.
+
+---
+
 # Attempt 1
 
 Pose prediction on the images in `images/` using Ultralytics YOLO26n-pose (`yolo26n-pose.pt`), the COCO-keypoint model described in the [pose estimation docs](https://docs.ultralytics.com/tasks/pose).
@@ -54,9 +77,9 @@ The script expects `runs/segment/golf_club_train/weights/best.pt`, produced by `
 
 ```powershell
 pip install ultralytics
-python trace_swing_plane.py
-python trace_swing_plane.py user_swings\1785648828688618000_swing.mp4
-python trace_swing_plane.py user_swings\1785648828688618000_swing.mp4 --mediapipe-wrists
+python -m golf_workflows.trace_swing_plane
+python -m golf_workflows.trace_swing_plane user_swings\1785648828688618000_swing.mp4
+python -m golf_workflows.trace_swing_plane user_swings\1785648828688618000_swing.mp4 --mediapipe-wrists
 ```
 
 With no path, the script picks a random video under `user_swings/`. Accepted extensions are `.mov`, `.mp4`, `.avi`, `.mkv`, and `.webm`.
@@ -118,10 +141,10 @@ pip install ultralytics einops timm==0.9.16 local-attention==1.9.0 mediapipe sci
 ## How to run
 
 ```powershell
-python golf_pose_3d.py
-python golf_pose_3d.py user_swings\1785648828688618000_swing.mp4
-python golf_pose_3d.py --all
-python golf_pose_3d.py user_swings\1785648828688618000_swing.mp4 --mediapipe-wrists
+python -m golf_workflows.golf_pose_3d
+python -m golf_workflows.golf_pose_3d user_swings\1785648828688618000_swing.mp4
+python -m golf_workflows.golf_pose_3d --all
+python -m golf_workflows.golf_pose_3d user_swings\1785648828688618000_swing.mp4 --mediapipe-wrists
 ```
 
 With no path, a random video under `user_swings/` is used. `--all` processes every video there and loads the models once.
@@ -189,3 +212,55 @@ The long clip’s speed peak is frame 177, the same frame chosen as impact. Fram
 - **Follow-through** is where speed falls below 35% of the impact speed.
 
 Wrist height is used only when fewer than eight clubhead samples exist. `--mediapipe-wrists` is optional and only patches weak YOLO wrists.
+
+
+## Experimental 17+5 lifter
+
+`golfpose_17+5_39.2_32.3_62.8.bin` is a 22-joint MixSTE2 checkpoint: 17 body joints plus `shaft`, `hosel`, `heel`, `toe_down`, and `toe_up`. Its learned spatial embedding is `[1, 22, 512]`, and its temporal embedding is `[1, 243, 512]`. It cannot accept a 15+5 / 20-point tensor or the existing 19-point tensor directly.
+
+Both lifter sizes are supported. The original 17+2 checkpoint remains the default and its file is preserved. The 17+5 mode has a separate default output directory.
+
+```powershell
+python -m golf_workflows.standard_frames --lifter 17+5 --input-dir pro_refs/Standard_10_frames --output-dir runs/standard_frames_17plus5_20261027
+python -m golf_workflows.golf_pose_3d user_swings/<swing>.mp4 --lifter 17+5 --output-dir runs/golf_pose_3d_17plus5
+
+# Original model and reference generation:
+python -m golf_workflows.standard_frames --lifter 17+2
+```
+
+This is an **imputed-input experiment**, not a complete 22-landmark detector upgrade. The existing YOLO26n-pose and club segmentation supply the same 17+2 inputs. Three unavailable clubhead inputs (`heel`, `toe_down`, `toe_up`) are stored as NaN with detection flags False; only the filled model input places them at the hosel. Their predicted 3D positions are model estimates conditioned on that fill, not measured clubface geometry. Clubhead orientation inferred from them is not reliable.
+
+A trial of the locally saved 22-keypoint DEKR model on the P1 face-on reference returned very low-confidence, out-of-golfer predictions. It was not incorporated as a source of measured landmarks. The DEKR checkpoint file remains available.
+
+The new reference run writes all 22 predicted joints, separate camera and fused reference renderings, raw 2D points, per-joint validity, filled 2D inputs, and imputation metadata. Reference fusion uses the same face-on/down-the-line method as before, with alignment chosen from the existing body/shaft bones. `runs/standard_frames/` is preserved and remains the scoring default.
+
+Official joint schema: https://github.com/MingHanLee/GolfPose/blob/main/configs/mmpose/_base_/datasets/golfswing_golfer.py
+
+
+## ViTPose-Huge 2D backend with the 17+5 lifter
+
+The saved COCO ViTPose-Huge checkpoint is available through `--pose-backend vitpose-huge` in both `standard_frames.py` and `golf_pose_3d.py`. The existing `yolo26n-pose` backend remains the default.
+
+```powershell
+python -m golf_workflows.standard_frames --pose-backend vitpose-huge --lifter 17+5 --input-dir pro_refs/Standard_10_frames --output-dir runs/standard_frames_vitpose_huge_17plus5_20261027
+python -m golf_workflows.golf_pose_3d user_swings/<swing>.mp4 --pose-backend vitpose-huge --lifter 17+5 --output-dir runs/golf_pose_3d_vitpose_huge_17plus5
+```
+
+The preserved YOLO26n-pose model locates the golfer's box. ViTPose-Huge replaces its body keypoints using a padded UDP crop at 256x192, RGB normalization, original/mirrored heatmap averaging, and MMPose's UDP/DARK decoder. Video frames use box-IoU association to follow the same golfer, with largest-box selection when no match exists. Single reference pictures are processed independently.
+
+`vitpose_tracking.py` implements the checkpoint's 32-layer, 1280-dimensional transformer and heatmap head with native PyTorch CPU operators. All released state tensors load strictly; training-only dropout is disabled. The unused class-token parameter is preserved, and patch positions use the checkpoint's slots 1 onward. This avoids requiring MMPreTrain or MMCV compiled operators in the current Windows environment. The ViTPose backend defaults to four PyTorch CPU threads; the video CLI can override this with `--pose-cpu-threads`. Decoder source attribution and license are in `third_party/golfpose/VITPOSE_SOURCE.txt` and `MMPOSE_LICENSE`.
+
+The 17 COCO body landmarks are converted to the existing GolfPose body order. The current trained segmentation model supplies shaft/hosel inputs. **ViTPose does not detect clubhead heel/toe landmarks**: those three missing 2D inputs remain NaN/False in the raw records and are filled at the hosel only for the 17+5 model input. Those 3D clubhead predictions remain experimental.
+
+Each reference view's `joints.json` records ViTPose's raw COCO coordinates, confidence responses, crop affine matrix, inference time, and the converted GolfPose joints. `joints.npz` stores 22-joint 2D/3D arrays and validity/filling information. The new run also provides comparison overviews and validation records. Existing reference folders and checkpoints are preserved; no new reference set is automatically selected for scoring.
+
+
+For the reviewed `b85ed0b4db566e63bce190824c2f2196.mp4` video trial:
+
+```powershell
+python -m golf_workflows.golf_pose_3d pro_refs/b85ed0b4db566e63bce190824c2f2196.mp4 --pose-backend vitpose-huge --lifter 17+5 --pose-cpu-threads 8 --positions-json runs/golf_pose_3d/b85ed0b4db566e63bce190824c2f2196/selected_frames.json --output-dir runs/golf_pose_3d_vitpose_huge_17plus5
+```
+
+`--positions-json` reuses the visually reviewed zero-based P1-P10 indices while calculating fresh 2D and 3D poses. It validates the source filename, coverage, ordering and frame bounds. Reviewed impact is retained rather than replaced by ball proximity. Video timestamps describe the edited slow-motion source. Omitting this option keeps automatic position selection.
+
+`--pose-cpu-threads` defaults to four. A timing check on the current CPU selected eight for this video; the heatmap differences from four threads were below `4e-7`. Source checkpoints and prior outputs are preserved. The video trial is saved separately under `runs/golf_pose_3d_vitpose_huge_17plus5/`.

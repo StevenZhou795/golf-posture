@@ -1,0 +1,32 @@
+{
+  "old_phases": {
+    "address": 3,
+    "top": 11,
+    "impact": 14,
+    "follow_through": 13,
+    "signal": "clubhead"
+  },
+  "new_phases": {
+    "address": 5,
+    "top": 29,
+    "impact": 42,
+    "follow_through": 51,
+    "signal": "refined_club+wrist"
+  },
+  "decoded_frames": 52,
+  "source_files_unchanged": 7,
+  "ten_frame_export": false,
+  "selection_error": "Frame identification did not produce all ten valid indices; supply --positions-json for reviewed indices",
+  "positions": {
+    "p1": 5,
+    "p2": 10,
+    "p3": 19,
+    "p4": 29,
+    "p5": 32,
+    "p6": 33,
+    "p7": 42,
+    "p8": 43,
+    "p9": 51,
+    "p10": null
+  }
+}

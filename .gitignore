@@ -6,6 +6,7 @@ venv/
 .env.*
 
 # GolfPose checkpoints are larger than GitHub's 100 MB file limit.
+/golfpose_17+5_39.2_32.3_62.8.bin
 golfpose_checkpoints/*.bin
 golfpose_checkpoints/*.pth
 

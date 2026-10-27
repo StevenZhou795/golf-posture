@@ -1,0 +1,32 @@
+{
+  "old_phases": {
+    "address": 3,
+    "top": 11,
+    "impact": 14,
+    "follow_through": 13,
+    "signal": "clubhead"
+  },
+  "new_phases": {
+    "address": 5,
+    "top": 29,
+    "impact": 38,
+    "follow_through": 51,
+    "signal": "refined_club+wrist"
+  },
+  "decoded_frames": 52,
+  "source_files_unchanged": 7,
+  "ten_frame_export": true,
+  "positions": {
+    "p1": 5,
+    "p2": 10,
+    "p3": 19,
+    "p4": 29,
+    "p5": 32,
+    "p6": 33,
+    "p7": 38,
+    "p8": 39,
+    "p9": 40,
+    "p10": 44
+  },
+  "score": 90.2
+}

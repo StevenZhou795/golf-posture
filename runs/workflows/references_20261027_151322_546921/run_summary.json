@@ -1,0 +1,37 @@
+{
+  "pose_backend": "vitpose-huge",
+  "models": {
+    "pose": "golfpose_checkpoints\\td-hm_ViTPose-huge_8xb64-210e_coco-256x192-e32adcd4_20230314.pth",
+    "pose_backend": {
+      "pose_backend": "vitpose-huge",
+      "pose_checkpoint": "golfpose_checkpoints\\td-hm_ViTPose-huge_8xb64-210e_coco-256x192-e32adcd4_20230314.pth",
+      "person_detector": "yolo26n-pose.pt",
+      "input_size_hw": [
+        256,
+        192
+      ],
+      "decoder": "UDPHeatmap + DARK refinement",
+      "flip_test": true,
+      "video_association": "box IoU >= 0.1, otherwise largest golfer",
+      "strict_parameter_load": true,
+      "cpu_threads": 8
+    },
+    "club": "runs\\segment\\golf_club_train\\weights\\best.pt",
+    "lifter": "golfpose_checkpoints\\golfpose_17+5_39.2_32.3_62.8.bin"
+  },
+  "lifter": "17+5",
+  "joint_count": 22,
+  "input_dir": "J:\\Golf_Posture\\pro_refs\\Standard_10_frames",
+  "output_dir": "J:\\Golf_Posture\\runs\\workflows\\references_20261027_151322_546921",
+  "sheets": 10,
+  "views": 30,
+  "finite_camera_poses": 30,
+  "reference_poses": 10,
+  "experimental": true,
+  "unmeasured_extra_club_inputs": [
+    "heel",
+    "toe_down",
+    "toe_up"
+  ],
+  "extra_club_input_fill": "hosel"
+}

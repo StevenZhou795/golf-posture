@@ -1,0 +1,226 @@
+{
+  "source": "pro_refs\\w04.mp4",
+  "video": "runs\\workflows\\videos\\w04\\w04_3d.avi",
+  "still": "runs\\workflows\\videos\\w04\\w04_3d.jpg",
+  "arrays": "runs\\workflows\\videos\\w04\\w04_3d.npz",
+  "checkpoint": "golfpose_checkpoints\\golfpose_17+5_39.2_32.3_62.8.bin",
+  "joint_count": 22,
+  "unmeasured_extra_club_inputs": [
+    "heel",
+    "toe_down",
+    "toe_up"
+  ],
+  "extra_club_input_fill": "hosel",
+  "pose_model": "golfpose_checkpoints\\td-hm_ViTPose-huge_8xb64-210e_coco-256x192-e32adcd4_20230314.pth",
+  "pose_backend": {
+    "pose_backend": "vitpose-huge",
+    "pose_checkpoint": "golfpose_checkpoints\\td-hm_ViTPose-huge_8xb64-210e_coco-256x192-e32adcd4_20230314.pth",
+    "person_detector": "yolo26n-pose.pt",
+    "input_size_hw": [
+      256,
+      192
+    ],
+    "decoder": "UDPHeatmap + DARK refinement",
+    "flip_test": true,
+    "video_association": "box IoU >= 0.1, otherwise largest golfer",
+    "strict_parameter_load": true,
+    "cpu_threads": 8
+  },
+  "club_model": "runs\\segment\\golf_club_train\\weights\\best.pt",
+  "club_refinement": {
+    "applied": true,
+    "method": "rigid_segment_weak_perspective",
+    "marker_length_m": 0.576200008392334,
+    "length_source": "median_reliable_mixste_prior",
+    "reliable_pairs": 24,
+    "optimizer_evaluations": 47,
+    "optimizer_cost": 1.0516050134235584,
+    "projection_scale_median": 0.4451725482940674,
+    "caveat": "Uncalibrated projection; inferred length and depth are not physical accuracy measurements"
+  },
+  "window_blending": true,
+  "frames": 58,
+  "frames_written": 58,
+  "fps": 27.619,
+  "receptive_field": 243,
+  "normalization": {
+    "canvas": [
+      1280,
+      720
+    ],
+    "golfer_fraction": 0.7,
+    "golfer_height_px": 390.85,
+    "center_px": [
+      344.91,
+      732.9
+    ],
+    "scale": 1.2895
+  },
+  "handedness": "right",
+  "view": "down_the_line",
+  "lead_side": "left",
+  "phases": {
+    "address": 24,
+    "top": 36,
+    "impact": 43,
+    "follow_through": 57,
+    "signal": "refined_club+wrist"
+  },
+  "phase_detection": {
+    "method": "refined_club_with_wrist_corroboration",
+    "original_club_observations": 49,
+    "body_observations": 58,
+    "body_scale_px": 110.387680257557,
+    "ball_impact_hint": 43,
+    "ball_impact_hint_accepted": true,
+    "reliable_club_pairs": 39,
+    "wrist_top": 36,
+    "wrist_impact": 42,
+    "quiet_threshold_body_units_per_s": 1.4709735015507197,
+    "finish_hold_frames": 7,
+    "finish_reason": "clip_end_no_sustained_hold"
+  },
+  "positions": {
+    "p1": 24,
+    "p2": 26,
+    "p3": 31,
+    "p4": 36,
+    "p5": 40,
+    "p6": 41,
+    "p7": 43,
+    "p8": 44,
+    "p9": 45,
+    "p10": 57
+  },
+  "checkpoint_selection": {
+    "method": "automatic",
+    "frame_index_base": 0,
+    "fresh_2d_inference": true
+  },
+  "position_stills": [
+    "P1.jpg",
+    "P2.jpg",
+    "P3.jpg",
+    "P4.jpg",
+    "P5.jpg",
+    "P6.jpg",
+    "P7.jpg",
+    "P8.jpg",
+    "P9.jpg",
+    "P10.jpg"
+  ],
+  "ball": {
+    "p1_xy": [
+      541.67,
+      863.67
+    ],
+    "p1_frame": 24,
+    "p7_clubhead_distance_px": 12.52
+  },
+  "p4_face": null,
+  "p7_face": null,
+  "projected_wrist_deg": {
+    "p4": 35.6,
+    "p7": 78.9
+  },
+  "lift_window": [
+    24,
+    57
+  ],
+  "club_detected_frames": 49,
+  "mediapipe_wrists_replaced": 0,
+  "interpolated_frames": {
+    "root": 0,
+    "right_hip": 0,
+    "right_knee": 0,
+    "right_foot": 0,
+    "left_hip": 0,
+    "left_knee": 0,
+    "left_foot": 0,
+    "spine": 0,
+    "thorax": 0,
+    "neck_base": 0,
+    "head": 0,
+    "left_shoulder": 0,
+    "left_elbow": 0,
+    "left_wrist": 0,
+    "right_shoulder": 0,
+    "right_elbow": 0,
+    "right_wrist": 0,
+    "shaft": 10,
+    "hosel": 9,
+    "heel": 58,
+    "toe_down": 58,
+    "toe_up": 58
+  },
+  "bone_length_3d": {
+    "root-left_hip": {
+      "mean_m": 0.0889,
+      "std_m": 0.0151
+    },
+    "left_hip-left_knee": {
+      "mean_m": 0.427,
+      "std_m": 0.0318
+    },
+    "left_knee-left_foot": {
+      "mean_m": 0.3989,
+      "std_m": 0.0115
+    },
+    "root-right_hip": {
+      "mean_m": 0.0871,
+      "std_m": 0.0186
+    },
+    "right_hip-right_knee": {
+      "mean_m": 0.4442,
+      "std_m": 0.015
+    },
+    "right_knee-right_foot": {
+      "mean_m": 0.4412,
+      "std_m": 0.0188
+    },
+    "root-spine": {
+      "mean_m": 0.2538,
+      "std_m": 0.0041
+    },
+    "spine-thorax": {
+      "mean_m": 0.2506,
+      "std_m": 0.0059
+    },
+    "thorax-neck_base": {
+      "mean_m": 0.1068,
+      "std_m": 0.0209
+    },
+    "neck_base-head": {
+      "mean_m": 0.1407,
+      "std_m": 0.0176
+    },
+    "thorax-left_shoulder": {
+      "mean_m": 0.1129,
+      "std_m": 0.0283
+    },
+    "left_shoulder-left_elbow": {
+      "mean_m": 0.2249,
+      "std_m": 0.0481
+    },
+    "left_elbow-left_wrist": {
+      "mean_m": 0.2262,
+      "std_m": 0.0378
+    },
+    "thorax-right_shoulder": {
+      "mean_m": 0.1058,
+      "std_m": 0.0366
+    },
+    "right_shoulder-right_elbow": {
+      "mean_m": 0.2727,
+      "std_m": 0.0733
+    },
+    "right_elbow-right_wrist": {
+      "mean_m": 0.1777,
+      "std_m": 0.0475
+    },
+    "shaft-hosel": {
+      "mean_m": 0.5762,
+      "std_m": 0.0
+    }
+  }
+}

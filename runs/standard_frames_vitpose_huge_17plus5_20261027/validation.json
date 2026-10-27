@@ -1,0 +1,31 @@
+{
+  "sheets": 10,
+  "camera_poses": 30,
+  "reference_poses": 10,
+  "saved_joint_count": 22,
+  "original_reference_files_verified_unchanged": 189,
+  "images_checked": 70,
+  "raw_coco_landmarks_recorded": 510,
+  "mean_heatmap_response": 0.9047661491468841,
+  "minimum_heatmap_response": 0.36600637435913086,
+  "mean_vitpose_seconds_per_view": 4.103433333333333,
+  "unit_tests": {
+    "passed": 8,
+    "failed": 0
+  },
+  "encoder_parity": "all 32 blocks exact; see adapter_validation.json",
+  "fusion_checks": "passed",
+  "imputation_flags_and_input_fill_checks": "passed",
+  "unmeasured_clubhead_inputs": [
+    "heel",
+    "toe_down",
+    "toe_up"
+  ],
+  "clubhead_input_fill": "hosel",
+  "command": "python standard_frames.py --pose-backend vitpose-huge --lifter 17+5 --input-dir pro_refs/Standard_10_frames --output-dir runs/standard_frames_vitpose_huge_17plus5_20261027",
+  "video_tracking_smoke_test": {
+    "passed": true,
+    "frames": 2,
+    "fps": 15
+  }
+}

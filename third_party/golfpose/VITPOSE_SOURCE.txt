@@ -1,0 +1,33 @@
+ViTPose-Huge adapter sources and contracts
+
+vitpose_tracking.py implements CPU inference for the official checkpoint:
+td-hm_ViTPose-huge_8xb64-210e_coco-256x192-e32adcd4_20230314.pth
+
+Architecture reference (OpenMMLab, Apache-2.0):
+https://github.com/open-mmlab/mmpretrain/blob/main/mmpretrain/models/backbones/vision_transformer.py
+https://github.com/open-mmlab/mmpretrain/blob/main/mmpretrain/models/utils/attention.py
+https://github.com/open-mmlab/mmpose/blob/main/mmpose/models/heads/heatmap_heads/heatmap_head.py
+
+Model configuration:
+https://github.com/open-mmlab/mmpose/blob/main/configs/body_2d_keypoint/topdown_heatmap/coco/td-hm_ViTPose-huge_8xb64-210e_coco-256x192.py
+
+vitpose_udp.py is an inference-only extraction of get_heatmap_maximum,
+gaussian_blur and refine_keypoints_dark_udp from installed MMPose 1.3.2:
+mmpose/codecs/utils/post_processing.py
+mmpose/codecs/utils/refinement.py
+Copyright (c) OpenMMLab. All rights reserved. See MMPOSE_LICENSE.
+
+Differences from the training runtime:
+- All 404 released state tensors load strictly into the inference graph.
+- The retained class token/position parameters are loaded; the class token
+  is unused, as required by with_cls_token=False. Patch positions use slots 1:.
+- Dropout and stochastic depth are omitted because they are identities in eval.
+- PyTorch scaled_dot_product_attention runs the attention on CPU.
+- Bounding boxes come from the preserved YOLO26n-pose checkpoint.
+- Crop: bbox center/scale, 1.25 padding, 192:256 aspect, UDP affine.
+- RGB normalization, original+flip averaging, 17 COCO heatmaps, UDP/DARK decode.
+- Video association chooses matching box IoU >= 0.1, then largest-box fallback.
+- The adapter emits existing Ultralytics-compatible pose results for the
+  existing club segmentation and GolfPose joint conversion code.
+- Heel/toe points are not part of this COCO model and remain explicitly imputed
+  when connected to the optional 17+5 lifter.

@@ -1,0 +1,101 @@
+{
+  "source": "runs\\golf_pose_3d_vitpose_huge_17plus5\\b85ed0b4db566e63bce190824c2f2196",
+  "frame_index_base": 0,
+  "lifted_frames": 281,
+  "both_endpoints_detected": 170,
+  "missing_endpoint_frames": 111,
+  "longest_missing_endpoint_run": 25,
+  "latest_17plus5": {
+    "length_all_lifted_m": {
+      "count": 281,
+      "mean": 0.7502148151397705,
+      "std": 0.10992727428674698,
+      "min": 0.5417735576629639,
+      "median": 0.7258551716804504,
+      "p90": 0.8240790367126465,
+      "max": 1.3091254234313965
+    },
+    "length_detected_endpoints_m": {
+      "count": 170,
+      "mean": 0.7136967182159424,
+      "std": 0.04480663686990738,
+      "min": 0.5544085502624512,
+      "median": 0.7181074023246765,
+      "p90": 0.7569817900657654,
+      "max": 0.8254498839378357
+    },
+    "projected_axis_disagreement_deg": {
+      "count": 170,
+      "mean": 4.325192451477051,
+      "std": 4.651336193084717,
+      "min": 0.0,
+      "median": 3.289067029953003,
+      "p90": 10.463896751403809,
+      "max": 36.91659164428711
+    },
+    "angular_change_per_frame_deg": {
+      "count": 280,
+      "mean": 3.531632661819458,
+      "std": 4.875542640686035,
+      "min": 0.08622922748327255,
+      "median": 1.5490179061889648,
+      "p90": 7.677150249481201,
+      "max": 36.447425842285156
+    }
+  },
+  "smoothed_to_detected_2d_length_ratio": {
+    "count": 170,
+    "mean": 1.0227071046829224,
+    "std": 0.28279221057891846,
+    "min": 0.44791677594184875,
+    "median": 0.9992510080337524,
+    "p90": 1.026668667793274,
+    "max": 3.990549325942993
+  },
+  "shortest_frame": 235,
+  "longest_frame": 260,
+  "limitations": [
+    "No ground-truth 3D, camera calibration, or measured club-marker distance.",
+    "Projected-axis discrepancy compares camera XY axes under an orthographic approximation; it is not calibrated reprojection error.",
+    "Raw 2D points already include tracker endpoint blending.",
+    "Checkpoint comparison measures consistency only, not physical accuracy."
+  ],
+  "controlled_17plus2": {
+    "length_all_lifted_m": {
+      "count": 281,
+      "mean": 0.7116946578025818,
+      "std": 0.10691330581903458,
+      "min": 0.428776353597641,
+      "median": 0.7011826038360596,
+      "p90": 0.7904792428016663,
+      "max": 1.2671875953674316
+    },
+    "length_detected_endpoints_m": {
+      "count": 170,
+      "mean": 0.6901006102561951,
+      "std": 0.04837727174162865,
+      "min": 0.5595940947532654,
+      "median": 0.6836550235748291,
+      "p90": 0.7568181753158569,
+      "max": 0.7943753600120544
+    },
+    "projected_axis_disagreement_deg": {
+      "count": 170,
+      "mean": 4.676445484161377,
+      "std": 4.720525741577148,
+      "min": 0.03426402062177658,
+      "median": 3.7772066593170166,
+      "p90": 11.275613784790039,
+      "max": 34.83076477050781
+    },
+    "angular_change_per_frame_deg": {
+      "count": 280,
+      "mean": 3.67181396484375,
+      "std": 4.8919854164123535,
+      "min": 0.05934702232480049,
+      "median": 1.4924073219299316,
+      "p90": 9.343152046203613,
+      "max": 26.940706253051758
+    }
+  }
+}

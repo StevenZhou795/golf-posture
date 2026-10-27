@@ -1,0 +1,17 @@
+{
+  "lifter": "17+5",
+  "joint_count": 22,
+  "input_dir": "J:\\Golf_Posture\\pro_refs\\Standard_10_frames",
+  "output_dir": "J:\\Golf_Posture\\runs\\standard_frames_17plus5_20261027",
+  "sheets": 10,
+  "views": 30,
+  "finite_camera_poses": 30,
+  "reference_poses": 10,
+  "experimental": true,
+  "unmeasured_extra_club_inputs": [
+    "heel",
+    "toe_down",
+    "toe_up"
+  ],
+  "extra_club_input_fill": "hosel"
+}

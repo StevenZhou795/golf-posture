@@ -1,0 +1,68 @@
+{
+  "file": "golfpose_checkpoints\\golfpose_17+5_39.2_32.3_62.8.bin",
+  "size_bytes": 405686369,
+  "sha256": "beffdcfe4de71663a456c9cf24b715c5b7c425dd39caab2273264d12b83b5606",
+  "architecture": "GolfPose MixSTE2",
+  "joint_count": 22,
+  "body_joints": 17,
+  "club_joints": [
+    "shaft",
+    "hosel",
+    "heel",
+    "toe_down",
+    "toe_up"
+  ],
+  "spatial_position_embedding": [
+    1,
+    22,
+    512
+  ],
+  "temporal_position_embedding": [
+    1,
+    243,
+    512
+  ],
+  "state_tensor_elements": 33786371,
+  "state_tensor_count": 204,
+  "saved_epoch": 156,
+  "model_input_shape": [
+    1,
+    243,
+    22,
+    2
+  ],
+  "model_output_shape": [
+    1,
+    243,
+    22,
+    3
+  ],
+  "normalization": "Existing 1280x720 virtual canvas, golfer box at 70 percent canvas height; normalized screen coordinates.",
+  "inference": "CPU, original MixSTE2 source; strict checkpoint load; mirror augmentation averaged; root-relative output.",
+  "unsupported_layout": "15+5 / 20 joints; checkpoint spatial embedding requires 22 slots.",
+  "trial_input_source": "Existing YOLO26n-pose body conversion and trained club segmentation.",
+  "unmeasured_input_policy": {
+    "names": [
+      "heel",
+      "toe_down",
+      "toe_up"
+    ],
+    "raw_coordinates": "NaN",
+    "valid": false,
+    "filled_coordinates": "hosel coordinates",
+    "claimed_as_observed": false
+  },
+  "dekr_preflight": {
+    "checkpoint": "golfpose_golfer_dekr.pth",
+    "sample": "P1 face_on",
+    "strict_load": "passed",
+    "root_response_max": 0.068776,
+    "result": "Very low keypoint confidence; highest-ranked instance outside golfer. Not adopted as input source; temporary CPU trial code removed."
+  },
+  "joint_schema_source": "https://github.com/MingHanLee/GolfPose/blob/main/configs/mmpose/_base_/datasets/golfswing_golfer.py",
+  "limitations": [
+    "Three clubhead inputs are imputed, not measured.",
+    "Predicted clubhead shape/orientation is not reliable evidence of real clubface geometry.",
+    "This is a checkpoint trial, not an evaluation against ground-truth 3D."
+  ]
+}

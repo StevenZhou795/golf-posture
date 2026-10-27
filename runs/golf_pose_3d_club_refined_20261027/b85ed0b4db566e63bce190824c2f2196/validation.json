@@ -1,0 +1,49 @@
+{
+  "original": {
+    "length_mean_m": 0.7502148151397705,
+    "length_std_m": 0.10992727428674698,
+    "length_min_m": 0.5417735576629639,
+    "length_max_m": 1.3091254234313965,
+    "detected_raw_axis_median_deg": 2.795029878616333,
+    "detected_raw_axis_p90_deg": 12.128626823425293,
+    "weak_perspective_projected_length_relative_error_median": 0.1952682219345539,
+    "weak_perspective_projected_length_relative_error_p90": 0.537677964456896
+  },
+  "new_lifting_before_constraint": {
+    "length_mean_m": 0.7223383784294128,
+    "length_std_m": 0.08182170987129211,
+    "length_min_m": 0.3257938623428345,
+    "length_max_m": 0.9260402321815491,
+    "detected_raw_axis_median_deg": 2.6149635314941406,
+    "detected_raw_axis_p90_deg": 10.62944507598877,
+    "weak_perspective_projected_length_relative_error_median": 0.2021373454731254,
+    "weak_perspective_projected_length_relative_error_p90": 0.5319169974556945
+  },
+  "refined": {
+    "length_mean_m": 0.7301540374755859,
+    "length_std_m": 4.3548435968432386e-08,
+    "length_min_m": 0.7301539778709412,
+    "length_max_m": 0.7301540970802307,
+    "detected_raw_axis_median_deg": 0.6896519660949707,
+    "detected_raw_axis_p90_deg": 1.9791920185089111,
+    "weak_perspective_projected_length_relative_error_median": 0.06712187327592423,
+    "weak_perspective_projected_length_relative_error_p90": 0.14823547818862734
+  },
+  "confidence_source": "binary_validity_only_original_confidence_unavailable",
+  "refinement": {
+    "applied": true,
+    "method": "rigid_segment_weak_perspective",
+    "marker_length_m": 0.7301540374755859,
+    "length_source": "median_reliable_mixste_prior",
+    "reliable_pairs": 170,
+    "optimizer_evaluations": 37,
+    "optimizer_cost": 1.0752802556786407,
+    "projection_scale_median": 0.44972851872444153,
+    "caveat": "Uncalibrated projection; inferred length and depth are not physical accuracy measurements"
+  },
+  "frames_written": 364,
+  "frames_decoded": 364,
+  "source_files_unchanged": 47,
+  "body_unchanged_by_constraint": true,
+  "raw_observations_unchanged": true
+}

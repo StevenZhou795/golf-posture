@@ -1,0 +1,130 @@
+{
+  "w01": {
+    "old_phases": {
+      "address": 19,
+      "top": 35,
+      "impact": 45,
+      "follow_through": 52,
+      "signal": "clubhead"
+    },
+    "new_phases": {
+      "address": 21,
+      "top": 37,
+      "impact": 45,
+      "follow_through": 57,
+      "signal": "refined_club+wrist"
+    },
+    "decoded_frames": 58,
+    "source_files_unchanged": 27,
+    "ten_frame_export": true,
+    "score": 92.2,
+    "positions": {
+      "p1": 21,
+      "p2": 27,
+      "p3": 31,
+      "p4": 37,
+      "p5": 43,
+      "p6": 44,
+      "p7": 45,
+      "p8": 46,
+      "p9": 47,
+      "p10": 52
+    }
+  },
+  "w02": {
+    "old_phases": {
+      "address": 12,
+      "top": 32,
+      "impact": 45,
+      "follow_through": 49,
+      "signal": "clubhead"
+    },
+    "new_phases": {
+      "address": 15,
+      "top": 36,
+      "impact": 45,
+      "follow_through": 58,
+      "signal": "refined_club+wrist"
+    },
+    "decoded_frames": 59,
+    "source_files_unchanged": 27,
+    "ten_frame_export": true,
+    "score": 92.1,
+    "positions": {
+      "p1": 15,
+      "p2": 16,
+      "p3": 29,
+      "p4": 36,
+      "p5": 39,
+      "p6": 44,
+      "p7": 45,
+      "p8": 46,
+      "p9": 48,
+      "p10": 58
+    }
+  },
+  "w03": {
+    "old_phases": {
+      "address": 3,
+      "top": 11,
+      "impact": 14,
+      "follow_through": 13,
+      "signal": "clubhead"
+    },
+    "new_phases": {
+      "address": 5,
+      "top": 29,
+      "impact": 42,
+      "follow_through": 51,
+      "signal": "refined_club+wrist"
+    },
+    "decoded_frames": 52,
+    "source_files_unchanged": 7,
+    "ten_frame_export": false,
+    "selection_error": "Frame identification did not produce all ten valid indices; supply --positions-json for reviewed indices",
+    "positions": {
+      "p1": 5,
+      "p2": 10,
+      "p3": 19,
+      "p4": 29,
+      "p5": 32,
+      "p6": 33,
+      "p7": 42,
+      "p8": 43,
+      "p9": 51,
+      "p10": null
+    }
+  },
+  "8b83acf159769157da0baa709a1fe55b": {
+    "old_phases": {
+      "address": 39,
+      "top": 46,
+      "impact": 144,
+      "follow_through": 50,
+      "signal": "clubhead"
+    },
+    "new_phases": {
+      "address": 41,
+      "top": 58,
+      "impact": 62,
+      "follow_through": 93,
+      "signal": "refined_club+wrist"
+    },
+    "decoded_frames": 156,
+    "source_files_unchanged": 7,
+    "ten_frame_export": false,
+    "selection_error": "Frame identification did not produce all ten valid indices; supply --positions-json for reviewed indices",
+    "positions": {
+      "p1": 41,
+      "p2": 45,
+      "p3": 50,
+      "p4": 58,
+      "p5": null,
+      "p6": null,
+      "p7": 62,
+      "p8": 63,
+      "p9": 70,
+      "p10": 90
+    }
+  }
+}

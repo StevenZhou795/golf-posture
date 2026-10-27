@@ -1,0 +1,238 @@
+{
+  "pose_score": 92.9,
+  "weight": "equal",
+  "frames": {
+    "p1": 60,
+    "p2": 88,
+    "p3": 114,
+    "p4": 172,
+    "p5": 212,
+    "p6": 226,
+    "p7": 237,
+    "p8": 254,
+    "p9": 280,
+    "p10": 340
+  },
+  "positions": {
+    "p1": {
+      "frame": 60,
+      "yaw_deg": 60,
+      "standard": "P1-position-in-golf-address",
+      "score": 91.6,
+      "parameters": {
+        "Alignment": 99.4,
+        "Hip Bend": 94.9,
+        "Hip Depth": 97.7,
+        "Knee Bend": 96.5,
+        "Hands": 93.2,
+        "Stance Width": 99.9,
+        "Flying Elbow": 94.1,
+        "Trail Knee": 98.6,
+        "Bend": 96.4,
+        "Shaft Lean": 31.4,
+        "Spine Tilt": 96.3,
+        "Lead Shoulder": 98.2,
+        "Lead Hip": 91.6,
+        "Lead Knee": 94.3
+      }
+    },
+    "p2": {
+      "frame": 88,
+      "yaw_deg": 60,
+      "standard": "P2-position-in-golf-takeaway",
+      "score": 91.8,
+      "parameters": {
+        "Alignment": 98.5,
+        "Hip Bend": 95.1,
+        "Hip Depth": 98.0,
+        "Knee Bend": 94.5,
+        "Hands": 97.2,
+        "Stance Width": 98.1,
+        "Flying Elbow": 88.3,
+        "Trail Knee": 98.0,
+        "Bend": 99.0,
+        "Shaft Lean": 53.8,
+        "Spine Tilt": 92.1,
+        "Lead Shoulder": 89.4,
+        "Lead Hip": 91.7,
+        "Lead Knee": 90.9
+      }
+    },
+    "p3": {
+      "frame": 114,
+      "yaw_deg": 60,
+      "standard": "P3-position-in-golf-halfway-back",
+      "score": 95.3,
+      "parameters": {
+        "Alignment": 95.9,
+        "Hip Bend": 98.3,
+        "Hip Depth": 100.0,
+        "Knee Bend": 99.7,
+        "Hands": 91.5,
+        "Stance Width": 98.5,
+        "Flying Elbow": 92.7,
+        "Trail Knee": 99.5,
+        "Bend": 94.5,
+        "Shaft Lean": 89.0,
+        "Spine Tilt": 93.2,
+        "Lead Shoulder": 87.3,
+        "Lead Hip": 94.1,
+        "Lead Knee": 99.9
+      }
+    },
+    "p4": {
+      "frame": 172,
+      "yaw_deg": 15,
+      "standard": "P4-position-in-golf-top-of-the-backswing",
+      "score": 90.5,
+      "parameters": {
+        "Alignment": 75.2,
+        "Hip Bend": 92.0,
+        "Hip Depth": 98.0,
+        "Knee Bend": 99.7,
+        "Hands": 96.3,
+        "Stance Width": 96.4,
+        "Flying Elbow": 93.4,
+        "Trail Knee": 98.0,
+        "Bend": 76.4,
+        "Shaft Lean": 50.2,
+        "Spine Tilt": 98.4,
+        "Lead Shoulder": 95.7,
+        "Lead Hip": 98.7,
+        "Lead Knee": 98.5
+      }
+    },
+    "p5": {
+      "frame": 212,
+      "yaw_deg": 45,
+      "standard": "P5-position-in-golf-early-downswing",
+      "score": 89.9,
+      "parameters": {
+        "Alignment": 90.5,
+        "Hip Bend": 92.7,
+        "Hip Depth": 98.1,
+        "Knee Bend": 95.1,
+        "Hands": 99.3,
+        "Stance Width": 98.1,
+        "Flying Elbow": 82.9,
+        "Trail Knee": 94.7,
+        "Bend": 95.2,
+        "Shaft Lean": 48.8,
+        "Spine Tilt": 88.7,
+        "Lead Shoulder": 86.3,
+        "Lead Hip": 93.2,
+        "Lead Knee": 95.5
+      }
+    },
+    "p6": {
+      "frame": 226,
+      "yaw_deg": 75,
+      "standard": "P6-position-in-golf-pre-impact",
+      "score": 94.2,
+      "parameters": {
+        "Alignment": 99.6,
+        "Hip Bend": 93.9,
+        "Hip Depth": 97.7,
+        "Knee Bend": 94.6,
+        "Hands": 91.9,
+        "Stance Width": 99.9,
+        "Flying Elbow": 87.7,
+        "Trail Knee": 94.4,
+        "Bend": 97.0,
+        "Shaft Lean": 75.1,
+        "Spine Tilt": 95.8,
+        "Lead Shoulder": 98.1,
+        "Lead Hip": 97.7,
+        "Lead Knee": 94.9
+      }
+    },
+    "p7": {
+      "frame": 237,
+      "yaw_deg": 105,
+      "standard": "P7-position-in-golf-impact",
+      "score": 95.7,
+      "parameters": {
+        "Alignment": 97.4,
+        "Hip Bend": 99.0,
+        "Hip Depth": 97.8,
+        "Knee Bend": 98.6,
+        "Hands": 95.2,
+        "Stance Width": 98.5,
+        "Flying Elbow": 97.0,
+        "Trail Knee": 98.2,
+        "Bend": 98.1,
+        "Shaft Lean": 74.1,
+        "Spine Tilt": 95.6,
+        "Lead Shoulder": 97.3,
+        "Lead Hip": 97.4,
+        "Lead Knee": 95.3
+      }
+    },
+    "p8": {
+      "frame": 254,
+      "yaw_deg": 120,
+      "standard": "P8-position-in-golf-release",
+      "score": 91.5,
+      "parameters": {
+        "Alignment": 99.3,
+        "Hip Bend": 92.4,
+        "Hip Depth": 93.9,
+        "Knee Bend": 93.9,
+        "Hands": 96.7,
+        "Stance Width": 93.8,
+        "Flying Elbow": 84.9,
+        "Trail Knee": 98.0,
+        "Bend": 98.3,
+        "Shaft Lean": 50.6,
+        "Spine Tilt": 95.3,
+        "Lead Shoulder": 98.4,
+        "Lead Hip": 95.1,
+        "Lead Knee": 89.9
+      }
+    },
+    "p9": {
+      "frame": 280,
+      "yaw_deg": 105,
+      "standard": "P9-position-in-golf-finish",
+      "score": 93.3,
+      "parameters": {
+        "Alignment": 95.7,
+        "Hip Bend": 93.1,
+        "Hip Depth": 93.1,
+        "Knee Bend": 91.9,
+        "Hands": 99.7,
+        "Stance Width": 98.0,
+        "Flying Elbow": 92.5,
+        "Trail Knee": 95.8,
+        "Bend": 96.7,
+        "Shaft Lean": 82.6,
+        "Spine Tilt": 96.2,
+        "Lead Shoulder": 91.4,
+        "Lead Hip": 91.1,
+        "Lead Knee": 88.1
+      }
+    },
+    "p10": {
+      "frame": 340,
+      "yaw_deg": 45,
+      "standard": "P10-position-in-golf-end-of-swing",
+      "score": 94.9,
+      "parameters": {
+        "Alignment": 99.5,
+        "Hip Bend": 88.8,
+        "Hip Depth": 98.6,
+        "Knee Bend": 97.1,
+        "Hands": 99.0,
+        "Stance Width": 99.1,
+        "Flying Elbow": 96.3,
+        "Trail Knee": 95.5,
+        "Bend": 93.3,
+        "Shaft Lean": 84.0,
+        "Spine Tilt": 94.7,
+        "Lead Shoulder": 92.6,
+        "Lead Hip": 91.6,
+        "Lead Knee": 98.6
+      }
+    }
+  }
+}

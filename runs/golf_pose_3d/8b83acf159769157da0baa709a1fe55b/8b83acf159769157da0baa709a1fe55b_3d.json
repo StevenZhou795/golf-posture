@@ -1,0 +1,178 @@
+{
+  "source": "pro_refs\\8b83acf159769157da0baa709a1fe55b.mp4",
+  "video": "runs\\golf_pose_3d\\8b83acf159769157da0baa709a1fe55b\\8b83acf159769157da0baa709a1fe55b_3d.avi",
+  "still": "runs\\golf_pose_3d\\8b83acf159769157da0baa709a1fe55b\\8b83acf159769157da0baa709a1fe55b_3d.jpg",
+  "arrays": "runs\\golf_pose_3d\\8b83acf159769157da0baa709a1fe55b\\8b83acf159769157da0baa709a1fe55b_3d.npz",
+  "checkpoint": "golfpose_checkpoints\\golfpose_17+2_33.6_30.5_59.5.bin",
+  "pose_model": "yolo26n-pose.pt",
+  "club_model": "runs\\segment\\golf_club_train\\weights\\best.pt",
+  "frames": 156,
+  "frames_written": 156,
+  "fps": 30.0,
+  "receptive_field": 243,
+  "normalization": {
+    "canvas": [
+      1280,
+      720
+    ],
+    "golfer_fraction": 0.7,
+    "golfer_height_px": 238.37,
+    "center_px": [
+      60.85,
+      311.94
+    ],
+    "scale": 2.11432
+  },
+  "handedness": "right",
+  "view": "down_the_line",
+  "lead_side": "left",
+  "phases": {
+    "address": 39,
+    "top": 59,
+    "impact": 66,
+    "follow_through": 80,
+    "signal": "visual_review_low_light"
+  },
+  "positions": {
+    "p1": 39,
+    "p2": 46,
+    "p3": 51,
+    "p4": 59,
+    "p5": 63,
+    "p6": 65,
+    "p7": 66,
+    "p8": 68,
+    "p9": 70,
+    "p10": 80
+  },
+  "position_stills": [
+    "P1.jpg",
+    "P2.jpg",
+    "P3.jpg",
+    "P4.jpg",
+    "P5.jpg",
+    "P6.jpg",
+    "P7.jpg",
+    "P8.jpg",
+    "P9.jpg",
+    "P10.jpg"
+  ],
+  "ball": {
+    "p1_xy": [
+      147.75,
+      415.21
+    ],
+    "p1_frame": 40,
+    "p7_clubhead_distance_px": null
+  },
+  "p4_face": null,
+  "p7_face": null,
+  "projected_wrist_deg": {
+    "p4": 63.2,
+    "p7": 139.6
+  },
+  "lift_window": [
+    39,
+    80
+  ],
+  "club_detected_frames": 64,
+  "mediapipe_wrists_replaced": 0,
+  "interpolated_frames": {
+    "root": 0,
+    "right_hip": 0,
+    "right_knee": 0,
+    "right_foot": 0,
+    "left_hip": 0,
+    "left_knee": 0,
+    "left_foot": 0,
+    "spine": 0,
+    "thorax": 0,
+    "neck_base": 77,
+    "head": 0,
+    "left_shoulder": 0,
+    "left_elbow": 7,
+    "left_wrist": 9,
+    "right_shoulder": 0,
+    "right_elbow": 0,
+    "right_wrist": 3,
+    "shaft": 94,
+    "hosel": 92
+  },
+  "bone_length_3d": {
+    "root-left_hip": {
+      "mean_m": 0.0634,
+      "std_m": 0.0157
+    },
+    "left_hip-left_knee": {
+      "mean_m": 0.4054,
+      "std_m": 0.0175
+    },
+    "left_knee-left_foot": {
+      "mean_m": 0.4019,
+      "std_m": 0.009
+    },
+    "root-right_hip": {
+      "mean_m": 0.0583,
+      "std_m": 0.0228
+    },
+    "right_hip-right_knee": {
+      "mean_m": 0.4144,
+      "std_m": 0.0182
+    },
+    "right_knee-right_foot": {
+      "mean_m": 0.4237,
+      "std_m": 0.0143
+    },
+    "root-spine": {
+      "mean_m": 0.2457,
+      "std_m": 0.0081
+    },
+    "spine-thorax": {
+      "mean_m": 0.2414,
+      "std_m": 0.0076
+    },
+    "thorax-neck_base": {
+      "mean_m": 0.1185,
+      "std_m": 0.0093
+    },
+    "neck_base-head": {
+      "mean_m": 0.1477,
+      "std_m": 0.0087
+    },
+    "thorax-left_shoulder": {
+      "mean_m": 0.0867,
+      "std_m": 0.0373
+    },
+    "left_shoulder-left_elbow": {
+      "mean_m": 0.2153,
+      "std_m": 0.0437
+    },
+    "left_elbow-left_wrist": {
+      "mean_m": 0.2226,
+      "std_m": 0.0574
+    },
+    "thorax-right_shoulder": {
+      "mean_m": 0.1041,
+      "std_m": 0.0301
+    },
+    "right_shoulder-right_elbow": {
+      "mean_m": 0.2363,
+      "std_m": 0.0416
+    },
+    "right_elbow-right_wrist": {
+      "mean_m": 0.2172,
+      "std_m": 0.0399
+    },
+    "shaft-hosel": {
+      "mean_m": 0.6578,
+      "std_m": 0.0861
+    }
+  },
+  "checkpoint_selection": {
+    "method": "visual_review_after_automatic_phase_failure",
+    "frame_index_base": 0,
+    "reason": "Low-light club segmentation gaps caused inconsistent automatic phases and missing positions.",
+    "impact_precision": "Nearest source frame, approximately +/-1 frame at 30 fps; contact time not independently measured.",
+    "shared_workflow_code_modified": false
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "filename": "td-hm_ViTPose-huge_8xb64-210e_coco-256x192-e32adcd4_20230314.pth",
+  "source_url": "https://download.openmmlab.com/mmpose/v1/body_2d_keypoint/topdown_heatmap/coco/td-hm_ViTPose-huge_8xb64-210e_coco-256x192-e32adcd4_20230314.pth",
+  "source_index": "https://github.com/open-mmlab/mmpose/blob/main/configs/body_2d_keypoint/topdown_heatmap/coco/vitpose_coco.md",
+  "downloaded_on": "2026-10-27",
+  "size_bytes": 2548954167,
+  "sha256": "e32adcd41ab0b0ef0b5bf3d167ddae7cdbd45fcf45e7f6a834815ef04d641f2b",
+  "official_hash_prefix_verified": true,
+  "model": "ViTPose-Huge",
+  "dataset": "COCO",
+  "body_keypoints": 17,
+  "input_size_hw": [
+    256,
+    192
+  ],
+  "workflow_integrated": true,
+  "adapter": "vitpose_tracking.py",
+  "optional_backend": "vitpose-huge",
+  "default_backend_changed": false,
+  "state_tensors_strictly_loaded": 404
+}
