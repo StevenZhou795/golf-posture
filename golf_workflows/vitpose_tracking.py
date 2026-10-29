@@ -22,6 +22,15 @@ BACKENDS = ("yolo26n-pose", "vitpose-huge")
 COCO_FLIP = [0, 2, 1, 4, 3, 6, 5, 8, 7, 10, 9, 12, 11, 14, 13, 16, 15]
 
 
+class _HistoryBuffer:
+    """Inert target for unused MMEngine training history in fine-tuned files."""
+
+    def min(self, *args, **kwargs): pass
+    def max(self, *args, **kwargs): pass
+    def current(self, *args, **kwargs): pass
+    def mean(self, *args, **kwargs): pass
+
+
 class Attention(nn.Module):
     def __init__(self):
         super().__init__()
@@ -58,11 +67,12 @@ class Encoder(nn.Module):
 
 
 class Backbone(nn.Module):
-    def __init__(self):
+    def __init__(self, position_tokens=193, retained_cls_token=True):
         super().__init__()
-        self.pos_embed = nn.Parameter(torch.empty(1, 193, 1280))
+        self.pos_embed = nn.Parameter(torch.empty(1, position_tokens, 1280))
         # The older MMPreTrain export retains this unused parameter as well.
-        self.cls_token = nn.Parameter(torch.empty(1, 1, 1280))
+        if retained_cls_token:
+            self.cls_token = nn.Parameter(torch.empty(1, 1, 1280))
         self.patch_embed = nn.Module()
         self.patch_embed.projection = nn.Conv2d(3, 1280, 16, stride=16, padding=2)
         self.layers = nn.ModuleList([Encoder() for _ in range(32)])
@@ -74,45 +84,55 @@ class Backbone(nn.Module):
         if (h, w) != (16, 12):
             raise ValueError(f"Expected 16x12 image patches, got {h}x{w}")
         # The released checkpoint retains a class-position slot, but no class token.
-        x = patches.flatten(2).transpose(1, 2) + self.pos_embed[:, 1:]
+        position = self.pos_embed if self.pos_embed.shape[1] == h * w else self.pos_embed[:, 1:]
+        x = patches.flatten(2).transpose(1, 2) + position
         for layer in self.layers:
             x = layer(x)
         return self.ln1(x).transpose(1, 2).reshape(image.shape[0], 1280, h, w)
 
 
 class HeatmapHead(nn.Module):
-    def __init__(self):
+    def __init__(self, keypoints=17):
         super().__init__()
         self.deconv_layers = nn.Sequential(
             nn.ConvTranspose2d(1280, 256, 4, stride=2, padding=1, bias=False), nn.BatchNorm2d(256), nn.ReLU(),
             nn.ConvTranspose2d(256, 256, 4, stride=2, padding=1, bias=False), nn.BatchNorm2d(256), nn.ReLU())
-        self.final_layer = nn.Conv2d(256, 17, 1)
+        self.final_layer = nn.Conv2d(256, keypoints, 1)
 
     def forward(self, x):
         return self.final_layer(self.deconv_layers(x))
 
 
 class ViTPoseHuge(nn.Module):
-    def __init__(self):
+    def __init__(self, keypoints=17, position_tokens=193, retained_cls_token=True):
         super().__init__()
-        self.backbone = Backbone()
-        self.head = HeatmapHead()
+        self.backbone = Backbone(position_tokens, retained_cls_token)
+        self.head = HeatmapHead(keypoints)
 
     def forward(self, image):
         return self.head(self.backbone(image))
 
 
-def load_checkpoint(path=CHECKPOINT):
+def load_checkpoint(path=CHECKPOINT, keypoints=17):
+    import builtins
+    import zipfile
     from numpy._core import multiarray
-    allowed = [np.ndarray, np.dtype, (multiarray._reconstruct, "numpy.core.multiarray._reconstruct"),
+    allowed = [builtins.getattr, np.ndarray, np.dtype, (multiarray._reconstruct, "numpy.core.multiarray._reconstruct"),
                (multiarray.scalar, "numpy.core.multiarray.scalar")]
     allowed += [type(np.dtype(t)) for t in ("float32", "float64", "int64", "int32", "uint8", "bool")]
+    # Fine-tuned MMPose checkpoints retain scalar training histories in meta.
+    # Map that unused record to an inert local object; importing MMEngine would
+    # initialize its formatter cache even though inference never reads it.
+    allowed.append((_HistoryBuffer, "mmengine.logging.history_buffer.HistoryBuffer"))
     with torch.serialization.safe_globals(allowed):
-        data = torch.load(path, map_location="cpu", weights_only=True)
+        data = torch.load(path, map_location="cpu", weights_only=True, mmap=zipfile.is_zipfile(path))
+    state = data["state_dict"]
+    position_tokens = int(state["backbone.pos_embed"].shape[1])
+    retained_cls_token = "backbone.cls_token" in state
     # Meta construction avoids allocating a second 2.55 GB set of parameters.
     with torch.device("meta"):
-        model = ViTPoseHuge()
-    model.load_state_dict(data["state_dict"], strict=True, assign=True)
+        model = ViTPoseHuge(keypoints, position_tokens, retained_cls_token)
+    model.load_state_dict(state, strict=True, assign=True)
     model.source_config = data.get("meta", {}).get("cfg", "")
     return model.eval()
 

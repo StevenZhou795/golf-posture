@@ -42,6 +42,7 @@ from golf_workflows.trace_swing_plane import (
     ClubSample,
     as_point,
     best_club,
+    best_club_box,
     body_anchor,
     collect_videos,
     golfer_index,
@@ -200,6 +201,7 @@ class Swing2D:
     boxes: np.ndarray
     samples: list[ClubSample]
     wrist_y: np.ndarray
+    club_confidence: np.ndarray | None = None
 
 
 def bone_side(a: str, b: str) -> str:
@@ -281,20 +283,24 @@ def fill_gaps(points: np.ndarray, valid: np.ndarray) -> np.ndarray:
     return filled
 
 
-def detect_2d(video: Path, pose_model: YOLO, club_model: YOLO, wrists: WristFallback | None = None) -> Swing2D:
+def detect_2d(video: Path, pose_model: YOLO, club_model: YOLO | None, wrists: WristFallback | None = None,
+              club_pose_model=None, track_club_path: bool = False, club_crop_model=None) -> Swing2D:
     pose_results = pose_model.predict(source=str(video), imgsz=640, stream=True, verbose=False)
     rows: list[np.ndarray] = []
     flags: list[np.ndarray] = []
     boxes: list[np.ndarray] = []
     samples: list[ClubSample] = []
     swing_wrist_y: list[float] = []
+    club_confidences: list[np.ndarray] = []
     size = (0, 0)
     for frame_index, pose_result in enumerate(pose_results):
         frame = pose_result.orig_img
         size = (frame.shape[1], frame.shape[0])
         diagonal = max(float(np.hypot(frame.shape[0], frame.shape[1])), 1.0)
-        points = np.full((len(GOLFPOSE_JOINTS), 2), np.nan)
-        valid = np.zeros(len(GOLFPOSE_JOINTS), dtype=bool)
+        joint_count = len(GOLFPOSE_JOINTS_22) if club_pose_model is not None else len(GOLFPOSE_JOINTS)
+        points = np.full((joint_count, 2), np.nan)
+        valid = np.zeros(joint_count, dtype=bool)
+        landmark_confidence = np.zeros(5, dtype=np.float32)
         box = np.full(4, np.nan)
 
         anchor = None
@@ -315,37 +321,63 @@ def detect_2d(video: Path, pose_model: YOLO, club_model: YOLO, wrists: WristFall
             if pose_result.boxes is not None and person < len(pose_result.boxes):
                 box = pose_result.boxes.xyxy[person].cpu().numpy().astype(np.float64)
 
-        previous = samples[-1] if samples else None
-        club_result = club_model.predict(
-            frame,
-            imgsz=640,
-            conf=CLUB_CONFIDENCE,
-            retina_masks=True,
-            max_det=3,
-            verbose=False,
-        )[0]
-        detection = best_club(
-            club_result,
-            club_model.names,
-            anchor,
-            None if previous is None else previous.clubhead,
-            diagonal,
-        )
-        if detection is not None:
+        previous = samples[-1] if track_club_path and samples else None
+        if club_crop_model is not None:
+            detection = None
+            official_club_box, _crop_details = club_crop_model.club_box(frame)
+        else:
+            club_result = club_model.predict(
+                frame, imgsz=640, conf=CLUB_CONFIDENCE, retina_masks=True,
+                max_det=3, verbose=False,
+            )[0]
+            detection = best_club(
+                club_result, club_model.names, anchor,
+                None if previous is None else previous.clubhead, diagonal,
+                return_box=club_pose_model is not None,
+            )
+            official_club_box = None
+        grip = head = None
+        face = None
+        if club_pose_model is not None:
+            club_box = official_club_box
+            golfer_box_fallback = False
+            if club_crop_model is None and detection is not None:
+                _seg_grip, _seg_head, _confidence, face, club_box = detection
+            elif club_crop_model is None:
+                club_box = best_club_box(club_result, club_model.names, anchor, diagonal)
+                if club_box is None and np.isfinite(box).all():
+                    club_box = box
+                    golfer_box_fallback = True
+            if club_box is not None:
+                inference = (club_pose_model.predict_coarse_to_fine if golfer_box_fallback
+                             else club_pose_model.predict)
+                landmarks, landmark_confidence, _details = inference(frame, club_box)
+                good = landmark_confidence >= club_pose_model.confidence_threshold
+                points[17:22] = landmarks
+                valid[17:22] = good
+                grip = landmarks[0] if good[0] else None
+                head = landmarks[1] if good[1] else None
+                confidence = float(np.mean(landmark_confidence[:2]))
+        elif detection is not None:
             grip, head, confidence, face = detection
-            sample = stabilize(grip, head, confidence, frame_index, previous, diagonal, face)
+            landmark_confidence[:2] = confidence
+        if track_club_path and head is not None:
+            sample = (stabilize(grip, head, confidence, frame_index, previous, diagonal, face)
+                      if head is not None else None)
             if sample is not None:
                 samples.append(sample)
-                points[JOINT["hosel"]] = sample.clubhead
-                valid[JOINT["hosel"]] = True
-                if sample.grip is not None:
-                    points[JOINT["shaft"]] = sample.grip
-                    valid[JOINT["shaft"]] = True
+                if club_pose_model is None:
+                    points[JOINT["hosel"]] = sample.clubhead
+                    valid[JOINT["hosel"]] = True
+                    if sample.grip is not None:
+                        points[JOINT["shaft"]] = sample.grip
+                        valid[JOINT["shaft"]] = True
 
         rows.append(points)
         flags.append(valid)
         boxes.append(box)
         swing_wrist_y.append(wrist_height(pose_result, person))
+        club_confidences.append(landmark_confidence)
         if frame_index % 10 == 0:
             print(f"  2D frame {frame_index}, club samples {len(samples)}", flush=True)
 
@@ -366,6 +398,7 @@ def detect_2d(video: Path, pose_model: YOLO, club_model: YOLO, wrists: WristFall
         boxes=np.stack(boxes),
         samples=samples,
         wrist_y=np.asarray(swing_wrist_y, dtype=np.float64),
+        club_confidence=np.stack(club_confidences),
     )
 
 
@@ -560,10 +593,13 @@ class Panel3D:
 def draw_skeleton_2d(image: np.ndarray, points: np.ndarray, valid: np.ndarray) -> None:
     height, width = image.shape[:2]
     thickness = max(2, width // 400)
-    for a, b in BONES:
+    names = joint_names(len(points))
+    indexes = {name: index for index, name in enumerate(names)}
+    bones = BONES_22 if len(points) == 22 else BONES
+    for a, b in bones:
         if (a, b) == ("shaft", "hosel"):
             continue
-        ia, ib = JOINT[a], JOINT[b]
+        ia, ib = indexes[a], indexes[b]
         if not (valid[ia] and valid[ib]):
             continue
         r, g, bl = BODY_RGB[bone_side(a, b)]
@@ -578,6 +614,9 @@ def draw_skeleton_2d(image: np.ndarray, points: np.ndarray, valid: np.ndarray) -
     for index in range(BODY_JOINTS):
         if valid[index]:
             cv2.circle(image, as_point(points[index], width, height), thickness + 1, (255, 255, 255), -1, cv2.LINE_AA)
+    for index in range(BODY_JOINTS, len(points)):
+        if valid[index]:
+            cv2.circle(image, as_point(points[index], width, height), thickness + 2, (0, 255, 255), -1, cv2.LINE_AA)
 
 
 def draw_ball(image: np.ndarray, ball_xy: list[float] | None) -> None:
@@ -844,9 +883,14 @@ def process(
     club_refinement: bool = False,
     club_marker_length_m: float | None = None,
     output_folder: Path | None = None,
+    club_pose_model=None,
+    track_club_path: bool = False,
+    club_crop_model=None,
 ) -> None:
     print(f"Source: {video}", flush=True)
-    swing = swing_for_lifter(detect_2d(video, pose_model, club_model, wrists), lifter)
+    swing = swing_for_lifter(
+        detect_2d(video, pose_model, club_model, wrists, club_pose_model, track_club_path, club_crop_model), lifter
+    )
     names = joint_names(swing.points.shape[1])
     if reviewed_positions is not None:
         if set(reviewed_positions) != set(POSITION_NAMES):
@@ -857,9 +901,12 @@ def process(
     club[~swing.valid[:, JOINT["hosel"]]] = np.nan
     phase_inputs=swing.filled.copy()
     swing.filled = smooth_keypoints(swing.filled, swing.fps)
-    club_confidence = np.zeros(swing.frames, dtype=np.float32)
-    for sample in swing.samples:
-        club_confidence[sample.frame] = sample.confidence
+    club_landmark_confidence = (swing.club_confidence if swing.club_confidence is not None
+                                else np.zeros((swing.frames, 5), dtype=np.float32))
+    club_confidence = np.mean(club_landmark_confidence[:, :2], axis=1)
+    if club_pose_model is None:
+        for sample in swing.samples:
+            club_confidence[sample.frame] = sample.confidence
     if club_refinement:
         from golf_workflows.club_refinement import prepare_club_inputs
         swing.filled, _ = prepare_club_inputs(swing.points, swing.filled, swing.valid, club_confidence)
@@ -937,6 +984,7 @@ def process(
         keypoints_3d=poses,
         keypoints_3d_before_club_refinement=unrefined_poses,
         club_confidence=club_confidence,
+        club_landmark_confidence=club_landmark_confidence,
         fps=np.float32(swing.fps),
         frame_size=np.array(swing.size),
     )
@@ -953,11 +1001,17 @@ def process(
                 "arrays": relative(arrays),
                 "checkpoint": relative(lifter.checkpoint_path),
                 "joint_count": len(names),
-                "unmeasured_extra_club_inputs": EXTRA_CLUB_JOINTS if len(names) == 22 else [],
-                "extra_club_input_fill": "hosel" if len(names) == 22 else None,
+                "unmeasured_extra_club_inputs": (EXTRA_CLUB_JOINTS if len(names) == 22 and club_pose_model is None else []),
+                "extra_club_input_fill": ("hosel" if len(names) == 22 and club_pose_model is None else None),
                 "pose_model": getattr(pose_model,"metadata",{}).get("pose_checkpoint",POSE_MODEL),
                 "pose_backend": getattr(pose_model,"metadata",{}),
-                "club_model": relative(MODEL_PATH),
+                "club_model": relative(MODEL_PATH) if club_model is not None else None,
+                "club_pose_backend": (getattr(club_pose_model, "metadata", None)
+                                      if club_pose_model is not None else {"club_pose_backend": "segmentation"}),
+                "club_crop_backend": (getattr(club_crop_model, "metadata", None)
+                                      if club_crop_model is not None else {"club_crop_backend": "segmentation"}),
+                "club_path_tracking": track_club_path,
+                "club_path_rendering": track_club_path,
                 "club_refinement": refinement,
                 "window_blending": club_refinement,
                 "frames": swing.frames,
@@ -1034,6 +1088,10 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--lifter", choices=("17+2", "17+5"), default="17+2")
     parser.add_argument("--pose-backend", choices=("yolo26n-pose", "vitpose-huge"), default="yolo26n-pose")
     parser.add_argument("--pose-cpu-threads", type=int, default=4)
+    parser.add_argument("--club-pose-backend", choices=("segmentation", "vitpose-huge"), default="segmentation")
+    parser.add_argument("--club-crop-backend", choices=("segmentation", "official-yolox-2cls"), default="segmentation")
+    parser.add_argument("--track-club-path", action="store_true",
+                        help="Opt in to temporal club association and the rendered swing trail.")
     parser.add_argument("--positions-json", type=Path, help="Reuse reviewed P1-P10 indices while inferring new poses.")
     parser.add_argument("--club-refinement", action="store_true", help="Use angular gap filling, blended windows and constrained club geometry.")
     parser.add_argument("--club-marker-length-m", type=float, help="Measured shaft-marker to hosel-marker distance, used with --club-refinement.")
@@ -1049,6 +1107,10 @@ def main(argv: list[str] | None = None) -> None:
     args = parser.parse_args(argv)
     if args.run_dir and args.all:
         parser.error("--run-dir accepts a single video only")
+    if args.club_pose_backend == "vitpose-huge" and args.lifter != "17+5":
+        parser.error("--club-pose-backend vitpose-huge requires --lifter 17+5")
+    if args.club_crop_backend == "official-yolox-2cls" and args.club_pose_backend != "vitpose-huge":
+        parser.error("--club-crop-backend official-yolox-2cls requires --club-pose-backend vitpose-huge")
     if args.club_marker_length_m is not None and (not args.club_refinement or not np.isfinite(args.club_marker_length_m) or args.club_marker_length_m <= 0):
         parser.error("--club-marker-length-m requires --club-refinement and a finite positive distance")
     if args.output_dir is not None:
@@ -1060,7 +1122,8 @@ def main(argv: list[str] | None = None) -> None:
     if args.club_refinement and args.output_dir is None:
         OUTPUT_DIR = OUTPUT_DIR.with_name(OUTPUT_DIR.name + "_club_refined")
 
-    if not MODEL_PATH.is_file():
+    needs_segmentation = args.club_crop_backend == "segmentation" or args.club_pose_backend == "segmentation"
+    if needs_segmentation and not MODEL_PATH.is_file():
         raise SystemExit(f"Trained golf-club weights not found: {MODEL_PATH}")
     if args.all:
         videos = collect_videos(VIDEO_DIR)
@@ -1072,7 +1135,17 @@ def main(argv: list[str] | None = None) -> None:
     lifter = load_lifter(CHECKPOINT_22 if args.lifter == "17+5" else CHECKPOINT)
     from golf_workflows.vitpose_tracking import load_pose_backend
     pose_model = load_pose_backend(args.pose_backend, cpu_threads=args.pose_cpu_threads)
-    club_model = YOLO(str(MODEL_PATH))
+    club_model = YOLO(str(MODEL_PATH)) if needs_segmentation else None
+    from golf_workflows.club_vitpose import load_club_pose_backend
+    try:
+        club_pose_model = load_club_pose_backend(args.club_pose_backend)
+    except FileNotFoundError as exc:
+        parser.error(str(exc))
+    from golf_workflows.official_yolox import load_club_crop_backend
+    try:
+        club_crop_model = load_club_crop_backend(args.club_crop_backend)
+    except FileNotFoundError as exc:
+        parser.error(str(exc))
     ball_model = None
     if BALL_MODEL.is_file():
         ball_model = YOLOE(str(BALL_MODEL))
@@ -1093,6 +1166,9 @@ def main(argv: list[str] | None = None) -> None:
                 club_refinement=args.club_refinement,
                 club_marker_length_m=args.club_marker_length_m,
                 output_folder=args.run_dir.resolve() if args.run_dir else None,
+                club_pose_model=club_pose_model,
+                track_club_path=args.track_club_path,
+                club_crop_model=club_crop_model,
             )
     finally:
         if wrists is not None:

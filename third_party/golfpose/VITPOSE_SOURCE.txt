@@ -11,6 +11,10 @@ https://github.com/open-mmlab/mmpose/blob/main/mmpose/models/heads/heatmap_heads
 Model configuration:
 https://github.com/open-mmlab/mmpose/blob/main/configs/body_2d_keypoint/topdown_heatmap/coco/td-hm_ViTPose-huge_8xb64-210e_coco-256x192.py
 
+GolfPose club fine-tuning configuration and five-point schema:
+https://github.com/MingHanLee/GolfPose/blob/main/configs/mmpose/golfpose_club_ViTPose_huge.py
+https://github.com/MingHanLee/GolfPose/blob/main/configs/mmpose/_base_/datasets/golfswing_club.py
+
 vitpose_udp.py is an inference-only extraction of get_heatmap_maximum,
 gaussian_blur and refine_keypoints_dark_udp from installed MMPose 1.3.2:
 mmpose/codecs/utils/post_processing.py
@@ -29,5 +33,6 @@ Differences from the training runtime:
 - Video association chooses matching box IoU >= 0.1, then largest-box fallback.
 - The adapter emits existing Ultralytics-compatible pose results for the
   existing club segmentation and GolfPose joint conversion code.
-- Heel/toe points are not part of this COCO model and remain explicitly imputed
-  when connected to the optional 17+5 lifter.
+- club_vitpose.py reuses the graph with the official five-channel fine-tuned
+  head. Club segmentation supplies its crop; its ordered output is shaft,
+  hosel, heel, toe_down and toe_up for the 17+5 lifter.

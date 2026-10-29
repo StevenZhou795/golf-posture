@@ -10,12 +10,12 @@
   "club_refinement": {
     "applied": true,
     "method": "rigid_segment_weak_perspective",
-    "marker_length_m": 0.7197567224502563,
+    "marker_length_m": 0.7194610834121704,
     "length_source": "median_reliable_mixste_prior",
-    "reliable_pairs": 19,
-    "optimizer_evaluations": 43,
-    "optimizer_cost": 0.558169617213625,
-    "projection_scale_median": 0.46507716178894043,
+    "reliable_pairs": 20,
+    "optimizer_evaluations": 34,
+    "optimizer_cost": 0.47684946662175975,
+    "projection_scale_median": 0.4913698434829712,
     "caveat": "Uncalibrated projection; inferred length and depth are not physical accuracy measurements"
   },
   "checkpoint_selection": {
@@ -26,7 +26,7 @@
   "frames": [
     {
       "position": "p1",
-      "frame_index": 19,
+      "frame_index": 21,
       "image": "P1.jpg",
       "pose_image": "P1_3d.jpg"
     },
@@ -44,7 +44,7 @@
     },
     {
       "position": "p4",
-      "frame_index": 35,
+      "frame_index": 37,
       "image": "P4.jpg",
       "pose_image": "P4_3d.jpg"
     },

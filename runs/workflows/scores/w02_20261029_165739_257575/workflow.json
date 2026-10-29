@@ -1,0 +1,6 @@
+{
+  "workflow": "score",
+  "video_run": "J:\\Golf_Posture\\runs\\workflows\\videos\\w02_20261029_165739_257575",
+  "references": "J:\\Golf_Posture\\runs\\workflows\\references_20261029_164614_247492",
+  "score": "score.json"
+}

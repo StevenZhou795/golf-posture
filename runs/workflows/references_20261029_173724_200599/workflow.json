@@ -1,0 +1,99 @@
+{
+  "schema_version": 1,
+  "workflow": "references",
+  "input_dir": "J:\\Golf_Posture\\pro_refs\\Standard_10_frames",
+  "from_run": null,
+  "fresh_2d_inference": true,
+  "positions": {
+    "p1": {
+      "folder": "P1-position-in-golf-address",
+      "image": "P1-position-in-golf-address/reference_3d.jpg",
+      "coordinates": "P1-position-in-golf-address/joints.npz"
+    },
+    "p2": {
+      "folder": "P2-position-in-golf-takeaway",
+      "image": "P2-position-in-golf-takeaway/reference_3d.jpg",
+      "coordinates": "P2-position-in-golf-takeaway/joints.npz"
+    },
+    "p3": {
+      "folder": "P3-position-in-golf-halfway-back",
+      "image": "P3-position-in-golf-halfway-back/reference_3d.jpg",
+      "coordinates": "P3-position-in-golf-halfway-back/joints.npz"
+    },
+    "p4": {
+      "folder": "P4-position-in-golf-top-of-the-backswing",
+      "image": "P4-position-in-golf-top-of-the-backswing/reference_3d.jpg",
+      "coordinates": "P4-position-in-golf-top-of-the-backswing/joints.npz"
+    },
+    "p5": {
+      "folder": "P5-position-in-golf-early-downswing",
+      "image": "P5-position-in-golf-early-downswing/reference_3d.jpg",
+      "coordinates": "P5-position-in-golf-early-downswing/joints.npz"
+    },
+    "p6": {
+      "folder": "P6-position-in-golf-pre-impact",
+      "image": "P6-position-in-golf-pre-impact/reference_3d.jpg",
+      "coordinates": "P6-position-in-golf-pre-impact/joints.npz"
+    },
+    "p7": {
+      "folder": "P7-position-in-golf-impact",
+      "image": "P7-position-in-golf-impact/reference_3d.jpg",
+      "coordinates": "P7-position-in-golf-impact/joints.npz"
+    },
+    "p8": {
+      "folder": "P8-position-in-golf-release",
+      "image": "P8-position-in-golf-release/reference_3d.jpg",
+      "coordinates": "P8-position-in-golf-release/joints.npz"
+    },
+    "p9": {
+      "folder": "P9-position-in-golf-finish",
+      "image": "P9-position-in-golf-finish/reference_3d.jpg",
+      "coordinates": "P9-position-in-golf-finish/joints.npz"
+    },
+    "p10": {
+      "folder": "P10-position-in-golf-end-of-swing",
+      "image": "P10-position-in-golf-end-of-swing/reference_3d.jpg",
+      "coordinates": "P10-position-in-golf-end-of-swing/joints.npz"
+    }
+  },
+  "models": {
+    "pose": "golfpose_checkpoints\\td-hm_ViTPose-huge_8xb64-210e_coco-256x192-e32adcd4_20230314.pth",
+    "pose_backend": {
+      "pose_backend": "vitpose-huge",
+      "pose_checkpoint": "golfpose_checkpoints\\td-hm_ViTPose-huge_8xb64-210e_coco-256x192-e32adcd4_20230314.pth",
+      "person_detector": "yolo26n-pose.pt",
+      "input_size_hw": [
+        256,
+        192
+      ],
+      "decoder": "UDPHeatmap + DARK refinement",
+      "flip_test": true,
+      "video_association": "box IoU >= 0.1, otherwise largest golfer",
+      "strict_parameter_load": true,
+      "cpu_threads": 8
+    },
+    "club": "runs\\segment\\golf_club_train\\weights\\best.pt",
+    "club_pose_backend": {
+      "club_pose_backend": "golfpose_club_ViTPose_huge",
+      "club_pose_checkpoint": "golfpose_checkpoints\\golfpose_club_ViTPose_huge.pth",
+      "landmarks": [
+        "shaft",
+        "hosel",
+        "heel",
+        "toe_down",
+        "toe_up"
+      ],
+      "input_size_hw": [
+        256,
+        192
+      ],
+      "decoder": "UDPHeatmap + DARK refinement",
+      "flip_test": true,
+      "crop_source": "selected golf-club segmentation box",
+      "strict_parameter_load": true
+    },
+    "lifter": "golfpose_checkpoints\\golfpose_17+5_39.2_32.3_62.8.bin"
+  },
+  "numerical_input": "joints.npz:reference_3d",
+  "image_count": 10
+}

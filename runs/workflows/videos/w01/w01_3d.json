@@ -30,12 +30,12 @@
   "club_refinement": {
     "applied": true,
     "method": "rigid_segment_weak_perspective",
-    "marker_length_m": 0.7197567224502563,
+    "marker_length_m": 0.7194610834121704,
     "length_source": "median_reliable_mixste_prior",
-    "reliable_pairs": 19,
-    "optimizer_evaluations": 43,
-    "optimizer_cost": 0.558169617213625,
-    "projection_scale_median": 0.46507716178894043,
+    "reliable_pairs": 20,
+    "optimizer_evaluations": 34,
+    "optimizer_cost": 0.47684946662175975,
+    "projection_scale_median": 0.4913698434829712,
     "caveat": "Uncalibrated projection; inferred length and depth are not physical accuracy measurements"
   },
   "window_blending": true,
@@ -60,17 +60,31 @@
   "view": "down_the_line",
   "lead_side": "left",
   "phases": {
-    "address": 19,
-    "top": 35,
+    "address": 21,
+    "top": 37,
     "impact": 45,
-    "follow_through": 52,
-    "signal": "clubhead"
+    "follow_through": 57,
+    "signal": "refined_club+wrist"
+  },
+  "phase_detection": {
+    "method": "refined_club_with_wrist_corroboration",
+    "original_club_observations": 41,
+    "body_observations": 58,
+    "body_scale_px": 134.66672339881842,
+    "ball_impact_hint": 45,
+    "ball_impact_hint_accepted": true,
+    "reliable_club_pairs": 35,
+    "wrist_top": 37,
+    "wrist_impact": 44,
+    "quiet_threshold_body_units_per_s": 1.2988162696744903,
+    "finish_hold_frames": 7,
+    "finish_reason": "clip_end_no_sustained_hold"
   },
   "positions": {
-    "p1": 19,
+    "p1": 21,
     "p2": 27,
     "p3": 31,
-    "p4": 35,
+    "p4": 37,
     "p5": 43,
     "p6": 44,
     "p7": 45,
@@ -106,12 +120,12 @@
   "p4_face": null,
   "p7_face": null,
   "projected_wrist_deg": {
-    "p4": 60.4,
-    "p7": 24.5
+    "p4": 58.9,
+    "p7": 19.7
   },
   "lift_window": [
-    19,
-    52
+    21,
+    57
   ],
   "club_detected_frames": 41,
   "mediapipe_wrists_replaced": 0,
@@ -141,71 +155,71 @@
   },
   "bone_length_3d": {
     "root-left_hip": {
-      "mean_m": 0.0884,
-      "std_m": 0.0165
+      "mean_m": 0.0773,
+      "std_m": 0.0195
     },
     "left_hip-left_knee": {
-      "mean_m": 0.4273,
-      "std_m": 0.0119
+      "mean_m": 0.3949,
+      "std_m": 0.0068
     },
     "left_knee-left_foot": {
-      "mean_m": 0.3999,
-      "std_m": 0.0082
+      "mean_m": 0.3958,
+      "std_m": 0.0149
     },
     "root-right_hip": {
-      "mean_m": 0.1001,
-      "std_m": 0.0161
+      "mean_m": 0.0793,
+      "std_m": 0.0222
     },
     "right_hip-right_knee": {
-      "mean_m": 0.4229,
-      "std_m": 0.0148
+      "mean_m": 0.3741,
+      "std_m": 0.0255
     },
     "right_knee-right_foot": {
-      "mean_m": 0.4369,
-      "std_m": 0.025
+      "mean_m": 0.4139,
+      "std_m": 0.0355
     },
     "root-spine": {
-      "mean_m": 0.2625,
-      "std_m": 0.0059
+      "mean_m": 0.2386,
+      "std_m": 0.0107
     },
     "spine-thorax": {
-      "mean_m": 0.2516,
-      "std_m": 0.0117
+      "mean_m": 0.2359,
+      "std_m": 0.0141
     },
     "thorax-neck_base": {
-      "mean_m": 0.1062,
-      "std_m": 0.0249
+      "mean_m": 0.0965,
+      "std_m": 0.0189
     },
     "neck_base-head": {
-      "mean_m": 0.1218,
-      "std_m": 0.0111
+      "mean_m": 0.1127,
+      "std_m": 0.013
     },
     "thorax-left_shoulder": {
-      "mean_m": 0.1126,
-      "std_m": 0.0117
+      "mean_m": 0.0868,
+      "std_m": 0.0275
     },
     "left_shoulder-left_elbow": {
-      "mean_m": 0.2157,
-      "std_m": 0.068
+      "mean_m": 0.2235,
+      "std_m": 0.0488
     },
     "left_elbow-left_wrist": {
-      "mean_m": 0.2435,
-      "std_m": 0.066
+      "mean_m": 0.2008,
+      "std_m": 0.0379
     },
     "thorax-right_shoulder": {
-      "mean_m": 0.1121,
-      "std_m": 0.0201
+      "mean_m": 0.0894,
+      "std_m": 0.0275
     },
     "right_shoulder-right_elbow": {
-      "mean_m": 0.2769,
-      "std_m": 0.0445
+      "mean_m": 0.2494,
+      "std_m": 0.0323
     },
     "right_elbow-right_wrist": {
-      "mean_m": 0.2679,
-      "std_m": 0.1146
+      "mean_m": 0.2005,
+      "std_m": 0.0303
     },
     "shaft-hosel": {
-      "mean_m": 0.7198,
+      "mean_m": 0.7195,
       "std_m": 0.0
     }
   }

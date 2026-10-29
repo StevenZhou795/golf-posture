@@ -13,8 +13,9 @@ saved poses against the references. Scoring defaults to the latest completed
 reference/video workflows. Use `python workflow.py <stage> --help` for options.
 
 Shared code is in `golf_workflows/`; generated files are in `runs/workflows/`.
-The new entry point defaults to ViTPose-Huge, GolfPose 17+5 and optional club
-refinement enabled for video. The three extra clubhead points remain unmeasured.
+The workflow entry point defaults to ViTPose-Huge body pose, the fine-tuned
+five-landmark GolfPose club ViTPose model, GolfPose 17+5, and club refinement
+for video. All five club inputs are stored with their own confidence/valid flag.
 See [WORKFLOW.md](WORKFLOW.md) for output contracts, reviewed-frame overrides,
 cached-run reuse and the exact scoring inputs. Existing model files and earlier
 runs are preserved. The notes below describe earlier experiments.
@@ -195,10 +196,9 @@ The long clip’s speed peak is frame 177, the same frame chosen as impact. Fram
 ## Limitations
 
 - GolfPose-3D was trained on ground-truth 2D from its own motion-capture set. Here, `neck_base`, `head`, and `spine` are estimated from COCO joints and YOLO adds noise, so expect more error than the paper’s 33.6 mm. `neck_base` is the least stable joint when the nose is hidden or the golfer looks down at the ball.
-- The 3D shaft is shorter than a real club (0.6–0.8 m against about 1.1 m for a driver). The segmentation grip end may not sit where the GolfPose `shaft` marker was placed.
-- No heel or toe points are available, so the clubhead is the hosel point.
+- The 3D shaft length remains a learned MixSTE prior unless a measured marker distance is supplied. Five-point 2D supervision improves projected geometry, but it does not turn the uncalibrated reconstruction into a physical club-length measurement.
+- Heel and toe points are available from the club ViTPose model, but occlusion and broad fallback crops can produce low-confidence outputs. Raw coordinates and confidence are retained; unreliable points are marked invalid and imputed only in the filled 3D input.
 - Output is root-relative. Overall position, and the absolute scale from the camera, are not measured.
-- A later upgrade is an Ultralytics pose model fine-tuned on the GolfPose 22-keypoint data, which would supply heel and toe points and allow the 17+5 checkpoint.
 
 # Swing phases
 
@@ -228,11 +228,31 @@ python -m golf_workflows.golf_pose_3d user_swings/<swing>.mp4 --lifter 17+5 --ou
 python -m golf_workflows.standard_frames --lifter 17+2
 ```
 
-This is an **imputed-input experiment**, not a complete 22-landmark detector upgrade. The existing YOLO26n-pose and club segmentation supply the same 17+2 inputs. Three unavailable clubhead inputs (`heel`, `toe_down`, `toe_up`) are stored as NaN with detection flags False; only the filled model input places them at the hosel. Their predicted 3D positions are model estimates conditioned on that fill, not measured clubface geometry. Clubhead orientation inferred from them is not reliable.
+The default `workflow.py` path now uses `golfpose_club_ViTPose_huge.pth` to
+observe all five club landmarks. The segmentation model still selects the golf
+club and supplies the crop; the ViTPose-Huge heatmaps supply `shaft`, `hosel`,
+`heel`, `toe_down`, and `toe_up` in that exact order. A landmark below the
+confidence cutoff remains NaN/False and is interpolated only in the filled model
+input. Use `--club-pose-backend segmentation --lifter 17+2` to restore the
+earlier two-proxy path.
 
 A trial of the locally saved 22-keypoint DEKR model on the P1 face-on reference returned very low-confidence, out-of-golfer predictions. It was not incorporated as a source of measured landmarks. The DEKR checkpoint file remains available.
 
 The new reference run writes all 22 predicted joints, separate camera and fused reference renderings, raw 2D points, per-joint validity, filled 2D inputs, and imputation metadata. Reference fusion uses the same face-on/down-the-line method as before, with alignment chosen from the existing body/shaft bones. `runs/standard_frames/` is preserved and remains the scoring default.
+
+Reference club visualization does not rescale or attach the club to the wrists.
+If a view has all five reliable GolfPose landmarks, its aligned MixSTE club can
+be saved separately as `reference_3d_club_overlay.jpg` and
+`reference_3d_club_overlay` in `joints.npz`. The numerical `reference_3d` used
+for scoring is never replaced by this overlay.
+The ordinary `reference_3d.jpg` is rendered body-only to avoid presenting
+imputed or out-of-frame club channels as observed geometry.
+
+Use the paper's separate-club detector route with
+`--club-crop-backend official-yolox-2cls`. It runs the released two-class
+YOLOX-s checkpoint (`person`, `club`) and passes the selected club box to
+`golfpose_club_ViTPose_huge.pth`. The existing segmentation crop remains the
+default and can be selected explicitly with `--club-crop-backend segmentation`.
 
 Official joint schema: https://github.com/MingHanLee/GolfPose/blob/main/configs/mmpose/_base_/datasets/golfswing_golfer.py
 
@@ -242,15 +262,20 @@ Official joint schema: https://github.com/MingHanLee/GolfPose/blob/main/configs/
 The saved COCO ViTPose-Huge checkpoint is available through `--pose-backend vitpose-huge` in both `standard_frames.py` and `golf_pose_3d.py`. The existing `yolo26n-pose` backend remains the default.
 
 ```powershell
-python -m golf_workflows.standard_frames --pose-backend vitpose-huge --lifter 17+5 --input-dir pro_refs/Standard_10_frames --output-dir runs/standard_frames_vitpose_huge_17plus5_20261027
-python -m golf_workflows.golf_pose_3d user_swings/<swing>.mp4 --pose-backend vitpose-huge --lifter 17+5 --output-dir runs/golf_pose_3d_vitpose_huge_17plus5
+python -m golf_workflows.standard_frames --pose-backend vitpose-huge --club-pose-backend vitpose-huge --lifter 17+5 --input-dir pro_refs/Standard_10_frames --output-dir runs/standard_frames_vitpose_huge_17plus5
+python -m golf_workflows.golf_pose_3d user_swings/<swing>.mp4 --pose-backend vitpose-huge --club-pose-backend vitpose-huge --lifter 17+5 --output-dir runs/golf_pose_3d_vitpose_huge_17plus5
 ```
 
 The preserved YOLO26n-pose model locates the golfer's box. ViTPose-Huge replaces its body keypoints using a padded UDP crop at 256x192, RGB normalization, original/mirrored heatmap averaging, and MMPose's UDP/DARK decoder. Video frames use box-IoU association to follow the same golfer, with largest-box selection when no match exists. Single reference pictures are processed independently.
 
-`vitpose_tracking.py` implements the checkpoint's 32-layer, 1280-dimensional transformer and heatmap head with native PyTorch CPU operators. All released state tensors load strictly; training-only dropout is disabled. The unused class-token parameter is preserved, and patch positions use the checkpoint's slots 1 onward. This avoids requiring MMPreTrain or MMCV compiled operators in the current Windows environment. The ViTPose backend defaults to four PyTorch CPU threads; the video CLI can override this with `--pose-cpu-threads`. Decoder source attribution and license are in `third_party/golfpose/VITPOSE_SOURCE.txt` and `MMPOSE_LICENSE`.
+`vitpose_tracking.py` implements the 32-layer, 1280-dimensional transformer and heatmap head with native PyTorch CPU operators. All released state tensors load strictly; training-only dropout is disabled. The COCO body export retains an unused class token and 193 position slots, while the GolfPose club export correctly loads its newer no-class-token, 192-position layout. This avoids requiring MMPreTrain or MMCV compiled operators in the current Windows environment. The ViTPose backend defaults to four PyTorch CPU threads; the video CLI can override this with `--pose-cpu-threads`. Decoder source attribution and license are in `third_party/golfpose/VITPOSE_SOURCE.txt` and `MMPOSE_LICENSE`.
 
-The 17 COCO body landmarks are converted to the existing GolfPose body order. The current trained segmentation model supplies shaft/hosel inputs. **ViTPose does not detect clubhead heel/toe landmarks**: those three missing 2D inputs remain NaN/False in the raw records and are filled at the hosel only for the 17+5 model input. Those 3D clubhead predictions remain experimental.
+The 17 COCO body landmarks are converted to the existing GolfPose body order.
+The separate club ViTPose checkpoint uses the same 192x256 UDP/DARK inference
+implementation with a five-channel head. It consumes the selected segmentation
+box and populates joints 17-21 directly. `joints.npz` and video `*_3d.npz` retain
+the raw coordinates, validity mask, filled input, and five confidence values so
+measured and interpolated landmarks remain distinguishable.
 
 Each reference view's `joints.json` records ViTPose's raw COCO coordinates, confidence responses, crop affine matrix, inference time, and the converted GolfPose joints. `joints.npz` stores 22-joint 2D/3D arrays and validity/filling information. The new run also provides comparison overviews and validation records. Existing reference folders and checkpoints are preserved; no new reference set is automatically selected for scoring.
 

@@ -83,6 +83,8 @@ def references(args):
     else:
         standard_frames.main(['--input-dir', str(args.input_dir), '--output-dir', str(out),
                               '--pose-backend', args.pose_backend, '--lifter', args.lifter,
+                              '--club-pose-backend', getattr(args, 'club_pose_backend', 'vitpose-huge'),
+                              '--club-crop-backend', getattr(args, 'club_crop_backend', 'segmentation'),
                               '--pose-cpu-threads', str(args.pose_cpu_threads)])
     entries = validate_reference_set(out)
     model_summary = args.from_run / 'run_summary.json' if cached else out / 'run_summary.json'
@@ -116,6 +118,16 @@ def export_identified_frames(folder):
             raise ValueError('P1–P10 indices must be distinct and increasing; supply --positions-json for reviewed indices')
         selected = poses[indices]
         joints = data['joints']
+        bundle = {}
+        for source, target in (
+            ('keypoints_2d', 'keypoints_2d'),
+            ('keypoints_2d_valid', 'keypoints_2d_valid'),
+            ('keypoints_2d_filled', 'keypoints_2d_filled'),
+            ('keypoints_2d_normalized', 'keypoints_2d_normalized'),
+            ('club_landmark_confidence', 'club_landmark_confidence'),
+        ):
+            if source in data:
+                bundle[target] = data[source][indices]
     if not np.isfinite(selected).all():
         raise ValueError('One or more selected poses lack finite 3D coordinates')
     for key, pose in zip(POSITIONS, selected):
@@ -123,7 +135,8 @@ def export_identified_frames(folder):
             raise ValueError(f'Missing selected source image: {key}')
         save_still(pose, folder / f'{key.upper()}_3d.jpg', key.upper())
     np.savez_compressed(folder / 'identified_frames.npz', positions=np.array(POSITIONS),
-                        source_frame_indices=np.array(indices), joints=joints, keypoints_3d=selected)
+                        source_frame_indices=np.array(indices), joints=joints, keypoints_3d=selected,
+                        **bundle)
     manifest = dict(schema_version=1, workflow='video', source=summary['source'], frame_index_base=0,
                     lead_side=summary.get('lead_side'), handedness=summary.get('handedness'),
                     checkpoint=summary.get('checkpoint'), pose_model=summary.get('pose_model'),
@@ -132,6 +145,9 @@ def export_identified_frames(folder):
                     frames=[dict(position=key, frame_index=frame, image=f'{key.upper()}.jpg',
                                  pose_image=f'{key.upper()}_3d.jpg') for key,frame in zip(POSITIONS,indices)],
                     coordinates='identified_frames.npz')
+    if 'club_landmark_confidence' in bundle:
+        manifest['club_landmarks'] = ['shaft','hosel','heel','toe_down','toe_up']
+        manifest['club_landmark_confidence'] = 'identified_frames.npz:club_landmark_confidence'
     write_json(folder / 'identified_frames.json', manifest)
     return manifest
 
@@ -172,10 +188,14 @@ def video(args):
         from golf_workflows import golf_pose_3d
         command = [str(args.video.resolve()), '--run-dir', str(out),
                    '--pose-backend', args.pose_backend, '--lifter', args.lifter,
+                   '--club-pose-backend', getattr(args, 'club_pose_backend', 'vitpose-huge'),
+                   '--club-crop-backend', getattr(args, 'club_crop_backend', 'segmentation'),
                    '--pose-cpu-threads', str(args.pose_cpu_threads),
                    '--handedness', args.handedness, '--view', args.view]
         if not args.no_club_refinement:
             command.append('--club-refinement')
+        if getattr(args, 'track_club_path', False):
+            command.append('--track-club-path')
         if args.club_marker_length_m is not None:
             command += ['--club-marker-length-m', str(args.club_marker_length_m)]
         if args.positions_json:
@@ -243,6 +263,8 @@ def main(argv=None):
     vid.add_argument('--from-run',type=Path,help='Export ten poses from an existing completed video run')
     vid.add_argument('--positions-json',type=Path,help='Optional reviewed P1–P10 selection')
     vid.add_argument('--no-club-refinement',action='store_true')
+    vid.add_argument('--track-club-path',action='store_true',
+                     help='Opt in to temporal club tracking and its rendered path')
     vid.add_argument('--club-marker-length-m',type=float)
     vid.add_argument('--handedness',choices=('right','left'),default='right')
     vid.add_argument('--view',choices=('down_the_line','face_on'),default='down_the_line')
@@ -252,6 +274,8 @@ def main(argv=None):
     for command in (ref,vid):
         command.add_argument('--pose-backend',choices=('yolo26n-pose','vitpose-huge'),default='vitpose-huge')
         command.add_argument('--lifter',choices=('17+2','17+5'),default='17+5')
+        command.add_argument('--club-pose-backend',choices=('segmentation','vitpose-huge'),default='vitpose-huge')
+        command.add_argument('--club-crop-backend',choices=('segmentation','official-yolox-2cls'),default='segmentation')
         command.add_argument('--pose-cpu-threads',type=int,default=8)
     for command in (ref,vid,scoring):
         command.add_argument('--output-dir',type=Path)

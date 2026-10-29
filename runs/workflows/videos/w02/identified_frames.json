@@ -10,12 +10,12 @@
   "club_refinement": {
     "applied": true,
     "method": "rigid_segment_weak_perspective",
-    "marker_length_m": 0.7024214863777161,
+    "marker_length_m": 0.6609529256820679,
     "length_source": "median_reliable_mixste_prior",
-    "reliable_pairs": 38,
-    "optimizer_evaluations": 29,
-    "optimizer_cost": 0.9803174983138054,
-    "projection_scale_median": 0.4445897340774536,
+    "reliable_pairs": 44,
+    "optimizer_evaluations": 20,
+    "optimizer_cost": 1.1268955856515948,
+    "projection_scale_median": 0.44460058212280273,
     "caveat": "Uncalibrated projection; inferred length and depth are not physical accuracy measurements"
   },
   "checkpoint_selection": {
@@ -26,7 +26,7 @@
   "frames": [
     {
       "position": "p1",
-      "frame_index": 12,
+      "frame_index": 15,
       "image": "P1.jpg",
       "pose_image": "P1_3d.jpg"
     },
@@ -44,19 +44,19 @@
     },
     {
       "position": "p4",
-      "frame_index": 32,
+      "frame_index": 36,
       "image": "P4.jpg",
       "pose_image": "P4_3d.jpg"
     },
     {
       "position": "p5",
-      "frame_index": 34,
+      "frame_index": 39,
       "image": "P5.jpg",
       "pose_image": "P5_3d.jpg"
     },
     {
       "position": "p6",
-      "frame_index": 39,
+      "frame_index": 44,
       "image": "P6.jpg",
       "pose_image": "P6_3d.jpg"
     },
@@ -80,7 +80,7 @@
     },
     {
       "position": "p10",
-      "frame_index": 49,
+      "frame_index": 58,
       "image": "P10.jpg",
       "pose_image": "P10_3d.jpg"
     }

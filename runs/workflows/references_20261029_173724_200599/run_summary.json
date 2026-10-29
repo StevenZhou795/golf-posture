@@ -1,0 +1,67 @@
+{
+  "pose_backend": "vitpose-huge",
+  "models": {
+    "pose": "golfpose_checkpoints\\td-hm_ViTPose-huge_8xb64-210e_coco-256x192-e32adcd4_20230314.pth",
+    "pose_backend": {
+      "pose_backend": "vitpose-huge",
+      "pose_checkpoint": "golfpose_checkpoints\\td-hm_ViTPose-huge_8xb64-210e_coco-256x192-e32adcd4_20230314.pth",
+      "person_detector": "yolo26n-pose.pt",
+      "input_size_hw": [
+        256,
+        192
+      ],
+      "decoder": "UDPHeatmap + DARK refinement",
+      "flip_test": true,
+      "video_association": "box IoU >= 0.1, otherwise largest golfer",
+      "strict_parameter_load": true,
+      "cpu_threads": 8
+    },
+    "club": "runs\\segment\\golf_club_train\\weights\\best.pt",
+    "club_pose_backend": {
+      "club_pose_backend": "golfpose_club_ViTPose_huge",
+      "club_pose_checkpoint": "golfpose_checkpoints\\golfpose_club_ViTPose_huge.pth",
+      "landmarks": [
+        "shaft",
+        "hosel",
+        "heel",
+        "toe_down",
+        "toe_up"
+      ],
+      "input_size_hw": [
+        256,
+        192
+      ],
+      "decoder": "UDPHeatmap + DARK refinement",
+      "flip_test": true,
+      "crop_source": "selected golf-club segmentation box",
+      "strict_parameter_load": true
+    },
+    "lifter": "golfpose_checkpoints\\golfpose_17+5_39.2_32.3_62.8.bin"
+  },
+  "lifter": "17+5",
+  "joint_count": 22,
+  "input_dir": "J:\\Golf_Posture\\pro_refs\\Standard_10_frames",
+  "output_dir": "J:\\Golf_Posture\\runs\\workflows\\references_20261029_173724_200599",
+  "sheets": 10,
+  "views": 30,
+  "finite_camera_poses": 30,
+  "reference_poses": 10,
+  "reference_club_overlays": 4,
+  "experimental": true,
+  "unmeasured_extra_club_inputs": [],
+  "extra_club_input_fill": null,
+  "club_landmarks": [
+    "shaft",
+    "hosel",
+    "heel",
+    "toe_down",
+    "toe_up"
+  ],
+  "club_landmark_valid_views": [
+    18,
+    28,
+    25,
+    18,
+    17
+  ]
+}

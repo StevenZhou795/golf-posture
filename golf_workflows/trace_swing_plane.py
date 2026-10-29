@@ -256,7 +256,7 @@ def body_anchor(result, index: int) -> np.ndarray | None:
     return None
 
 
-def best_club(result, names, anchor, previous_head, diagonal):
+def best_club(result, names, anchor, previous_head, diagonal, return_box=False):
     """Pick the golf-club mask and split it into grip and clubhead."""
     if result.boxes is None or result.masks is None or len(result.boxes) == 0:
         return None
@@ -291,11 +291,32 @@ def best_club(result, names, anchor, previous_head, diagonal):
         if anchor is not None:
             score -= 0.4 * float(np.linalg.norm(reference - np.asarray(anchor)) / diagonal)
         if chosen is None or score > chosen[0]:
-            chosen = (score, grip, head, float(confidences[index]), face)
+            box = result.boxes.xyxy[index].cpu().numpy().astype(np.float64)
+            chosen = (score, grip, head, float(confidences[index]), face, box)
     if chosen is None:
         return None
-    _, grip, head, confidence, face = chosen
+    _, grip, head, confidence, face, box = chosen
+    if return_box:
+        return grip, head, confidence, face, box
     return grip, head, confidence, face
+
+
+def best_club_box(result, names, anchor, diagonal):
+    """Choose a club detection box even when its mask is too round/short for PCA."""
+    if result.boxes is None or len(result.boxes) == 0:
+        return None
+    chosen = None
+    for index, class_id in enumerate(result.boxes.cls.cpu().tolist()):
+        if not is_golf_club(str(names[int(class_id)])):
+            continue
+        box = result.boxes.xyxy[index].cpu().numpy().astype(np.float64)
+        center = (box[:2] + box[2:]) / 2
+        score = float(result.boxes.conf[index])
+        if anchor is not None:
+            score -= 0.2 * float(np.linalg.norm(center - np.asarray(anchor)) / diagonal)
+        if chosen is None or score > chosen[0]:
+            chosen = (score, box)
+    return None if chosen is None else chosen[1]
 
 
 def stabilize(grip, head, confidence, frame_index, previous, diagonal, face=None) -> ClubSample | None:
