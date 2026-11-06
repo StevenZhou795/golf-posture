@@ -1,289 +1,289 @@
-# Shaft tracking improvement log
+# 杆身跟踪改进日志
 
-Date: 2026-10-27
+日期：2026-10-27
 
-## Objective and baseline
+## 目标与基线
 
-Improve shaft direction and length consistency while preserving the existing models,
-raw observations, validity flags and previous outputs. This experiment uses
-`pro_refs/b85ed0b4db566e63bce190824c2f2196.mp4` and the reviewed P1–P10 frame indices.
+在保留现有模型、原始观测、有效性标志和先前输出的前提下，
+提升杆身（shaft）方向与长度的一致性。本实验使用
+`pro_refs/b85ed0b4db566e63bce190824c2f2196.mp4` 以及经过审核的 P1–P10 帧索引。
 
-Baseline run:
-`runs/golf_pose_3d_vitpose_huge_17plus5/b85ed0b4db566e63bce190824c2f2196`.
+基线运行：
+`runs/golf_pose_3d_vitpose_huge_17plus5/b85ed0b4db566e63bce190824c2f2196`。
 
-Initial audit artifacts are in `runs/shaft_tracking_audit_20261027`.
-The video contains 364 frames; 281 frames (60–340 inclusive) have lifted poses.
-Both club endpoints were detected in 170 of these frames. At least one was
-missing in 111 frames; the longest consecutive gap was 25 frames.
+初始审计产物位于 `runs/shaft_tracking_audit_20261027`。
+该视频共 364 帧；其中 281 帧（60–340，含两端）具有经 3D 提升（lifting）得到的姿态。
+在这些帧中，有 170 帧同时检测到了球杆的两个端点。另有 111 帧
+至少缺失一个端点；最长的连续缺失段为 25 帧。
 
-## Findings
+## 发现
 
-1. The custom club segmentation model supplies PCA contour endpoints. The end
-   nearest the wrists is mapped to GolfPose `shaft`; the other is mapped to
-   `hosel`. These proxies do not establish the original training-marker locations.
-2. The tracker already blends consecutive endpoint coordinates. The workflow
-   then linearly fills missing coordinates and applies a five-frame moving average
-   at 30 fps. Interpolating/averaging endpoints independently can shorten a
-   rotating shaft's projected vector.
-3. MixSTE2 predicts XYZ coordinates for every joint. Spatial attention links
-   golfer and club points; temporal attention links each joint across 243 frames.
-   There is no explicit rigid club, fixed segment length or calibrated reprojection
-   constraint. The published losses concern joint position, velocity and temporal
-   consistency: [GolfPose paper](https://minghanlee.github.io/papers/ICPR_2024_GolfPose.pdf).
-4. The 17+5 trial still has only two independently observed club points. `heel`,
-   `toe_down` and `toe_up` are unmeasured and filled at hosel. Their validity flags
-   remain false. This experiment does not change that fact.
-5. The old window assembly selects the first available prediction in overlaps,
-   producing a hard context handoff. This is secondary to missing observations
-   in this particular video, but is straightforward to improve.
-6. The virtual body-normalized canvas is not a calibrated camera. Model metres
-   and nominal equipment length cannot be equated without validation. The
-   constrained segment is shaft-marker to hosel-marker, not full club length.
+1. 自定义的球杆分割（segmentation）模型提供基于 PCA 的轮廓端点。最靠近手腕的一端
+   被映射为 GolfPose 的 `shaft`，另一端被映射为
+   `hosel`。这些代理点并不能确定原始训练标记（marker）的位置。
+2. 跟踪器本身已经会融合相邻帧的端点坐标。随后工作流
+   对缺失坐标做线性填充，并在 30 fps 下施加五帧移动平均。
+   对各端点分别进行插值/平均，会使旋转中杆身的
+   投影向量变短。
+3. MixSTE2 为每个关节预测 XYZ 坐标。空间注意力将
+   球手与球杆的点关联起来；时间注意力将每个关节在 243 帧之间关联起来。
+   模型中没有显式的刚性球杆、固定线段长度或经过标定的重投影
+   约束。已发表的损失函数涉及关节位置、速度和时间
+   一致性：[GolfPose 论文](https://minghanlee.github.io/papers/ICPR_2024_GolfPose.pdf)。
+4. 17+5 试验仍然只有两个被独立观测到的球杆点。`heel`、
+   `toe_down` 和 `toe_up` 未被测量，以杆颈位置填充。它们的有效性标志
+   仍为 false。本实验不改变这一事实。
+5. 旧的窗口拼接方式在重叠区域选取第一个可用的预测，
+   导致上下文的生硬切换。在这段视频中，该问题的影响次于观测缺失，
+   但改进起来很直接。
+6. 基于身体归一化的虚拟画布并非经过标定的相机。未经验证，
+   不能将模型中的“米”与器材的标称长度等同。受约束的
+   线段是从杆身标记到杆颈标记，而不是球杆全长。
 
-## Implemented changes
+## 已实施的改动
 
-### Angular gap filling
+### 角度式缺口填充
 
-`club_refinement.prepare_club_inputs` uses jointly observed endpoint pairs to
-derive center, projected length and unwrapped image angle. It interpolates these
-quantities separately through missing intervals and reconstructs the endpoints.
-Detected pairs are preserved, rather than averaged with neighbouring frames.
-When just one endpoint is observed, that endpoint is preserved and the missing
-one is reconstructed from the interpolated vector. Raw arrays and validity flags
-are never changed. Body smoothing is unchanged.
+`club_refinement.prepare_club_inputs` 利用两端同时被观测到的端点对，
+推导出中心、投影长度和解卷绕后的图像角度。它在缺失区间内对这些
+量分别插值，再重建端点。
+已检测到的端点对被原样保留，而不是与相邻帧取平均。
+当只观测到一个端点时，保留该端点，缺失的
+那个端点由插值得到的向量重建。原始数组和有效性标志
+从不被修改。身体平滑处理保持不变。
 
-This prevents chord shortening during a rotating gap, but cannot recover
-unobserved fast turns, full rotations, occlusion or endpoint identity errors.
-Projected length remains variable to allow foreshortening. The existing detector
-and its endpoint blending remain upstream; replacing these with supervised
-shaft/hosel landmarks is still future work.
+这可以防止在旋转过程中的缺口里出现弦长缩短，但无法恢复
+未被观测到的快速转动、整圈旋转、遮挡或端点身份错误。
+投影长度仍保持可变，以容许透视缩短（foreshortening）。现有检测器
+及其端点融合仍位于上游；用有监督的
+杆身/杆颈标记点（landmark）取而代之仍是后续工作。
 
-### Overlapping MixSTE window blending
+### MixSTE 重叠窗口融合
 
-With refinement enabled, windows use a 121-frame stride and an end-aligned final
-window. Predictions are averaged with triangular weights favouring window
-centres. The old first-window ownership remains available with refinement off.
-Short clips retain last-frame padding to 243 frames.
+启用精修后，窗口采用 121 帧步长，最后一个窗口与序列末尾
+对齐。预测结果使用偏向窗口中心的三角权重
+进行加权平均。关闭精修时，仍可使用旧的“首个窗口优先”归属方式。
+短片段仍以末帧填充至 243 帧。
 
-### Constrained 3D segment fit
+### 受约束的 3D 线段拟合
 
-`club_refinement.refine_club_3d` fits unit direction vectors `u[t]` and constructs
-`hosel[t] = shaft[t] + L * u[t]`. The positive distance `L` is either explicitly
-supplied with `--club-marker-length-m`, or inferred as the median MixSTE distance
-over reliable jointly detected endpoint frames. The latter is a model prior,
-not a physical measurement.
+`club_refinement.refine_club_3d` 拟合单位方向向量 `u[t]`，并构造
+`hosel[t] = shaft[t] + L * u[t]`。正距离 `L` 要么通过
+`--club-marker-length-m` 显式给定，要么取可靠的两端同时检测帧上
+MixSTE 距离的中位数作为推断值。后者是模型先验，
+而不是物理测量值。
 
-A positive weak-perspective projection scale `s[t]` is fitted to centered body XY
-coordinates and normalized 2D body coordinates. Scale is bounded to 0.5–2 times
-its positive sequence median. The normalized target club vector is
-`v[t] = (hosel_2d[t] - shaft_2d[t]) / (s[t] * L)`.
+基于居中后的身体 XY 坐标与归一化 2D 身体坐标，
+拟合一个为正的弱透视（weak perspective）投影尺度 `s[t]`。尺度被限制在
+其正值序列中位数的 0.5–2 倍之间。归一化后的目标球杆向量为
+`v[t] = (hosel_2d[t] - shaft_2d[t]) / (s[t] * L)`。
 
-The robust least-squares residual combines:
+鲁棒最小二乘残差由以下几项组成：
 
-- `sqrt(w[t]) * (u[t].xy - v[t])` for observed endpoint pairs;
-- `0.3 * (u[t] - MixSTE_direction[t])` as a depth/direction prior;
-- `0.4 * second_difference(u[t])` for temporal regularity.
+- `sqrt(w[t]) * (u[t].xy - v[t])`，用于已观测的端点对；
+- `0.3 * (u[t] - MixSTE_direction[t])`，作为深度/方向先验；
+- `0.4 * second_difference(u[t])`，用于保证时间上的规整性。
 
-`w[t]` is joint endpoint validity times detector confidence. Missing pairs exert
-zero image-data force. The solver uses `soft_l1`, scale 0.1 and at most 100
-function evaluations. These weights are initial engineering choices, not tuned
-against ground-truth golf motion. Fewer than three reliable pairs or failed
-convergence skips the constraint and records the reason.
+`w[t]` 为两端点联合有效性乘以检测器置信度。缺失的端点对
+不施加任何图像数据约束力。求解器使用 `soft_l1`、尺度 0.1，最多进行 100 次
+函数评估。这些权重是初始的工程取值，并未针对
+真实高尔夫动作数据进行调优。若可靠端点对少于三个或
+未能收敛，则跳过该约束并记录原因。
 
-The shaft anchor and all body joints remain unchanged by this fitting stage.
-Additional predicted head markers translate with the hosel, preserving their
-relative offsets; they do not become measured landmarks. This is a rigid shaft
-segment approximation and does not model shaft flex.
+在这一拟合阶段，杆身锚点和所有身体关节均保持不变。
+额外预测的杆头标记随杆颈一起平移，保持其
+相对偏移；它们不会因此成为实测标记点。这是一种杆身刚性
+线段（rigid segment）近似，不对杆身弯曲建模。
 
-### Integration and preservation
+### 集成与保留
 
-`golf_pose_3d.py` adds `--club-refinement` and optional
-`--club-marker-length-m`. Without an explicit output directory, refinement adds
-`_club_refined` to the output directory name. The option is experimental and
-off by default. Existing model defaults and checkpoint files are retained.
+`golf_pose_3d.py` 新增 `--club-refinement` 以及可选的
+`--club-marker-length-m`。未显式指定输出目录时，精修会在
+输出目录名后追加 `_club_refined`。该选项属于实验性质，
+默认关闭。现有模型默认设置和权重检查点文件均予以保留。
 
-NPZ output now also retains `keypoints_3d_before_club_refinement` and
-`club_confidence`. JSON records the refinement method, inferred/measured length,
-optimizer result and projection caveat. The pre-refinement array has the new
-inputs and window blending; it is not a copy of the previous run's predictions.
+NPZ 输出现在还会保存 `keypoints_3d_before_club_refinement` 和
+`club_confidence`。JSON 记录精修方法、推断/实测长度、
+优化器结果以及投影方面的注意事项。精修前的数组已采用新的
+输入处理和窗口融合；它并不是上一次运行预测结果的副本。
 
-`replay_club_refinement.py` reuses cached 2D detections for a controlled test,
-repeats MixSTE inference with the new preparation and blending, fits the club,
-and exports a full video and P1–P10 stills to a separate empty folder.
+`replay_club_refinement.py`（现位于 `archive/scripts/`）复用缓存的 2D 检测结果进行对照测试，
+以新的预处理和融合方式重新执行 MixSTE 推理，拟合球杆，
+并将完整视频和 P1–P10 静帧导出到一个单独的空文件夹。
 
-## Trial execution and results
+## 试验执行与结果
 
-Executed:
+执行命令：
 
 ```powershell
 python replay_club_refinement.py runs/golf_pose_3d_vitpose_huge_17plus5/b85ed0b4db566e63bce190824c2f2196 --output-dir runs/golf_pose_3d_club_refined_20261027/b85ed0b4db566e63bce190824c2f2196
 ```
 
-The cached input lacks original detector confidence values. This replay uses
-binary valid/missing weights and explicitly records that limitation. Fresh video
-runs use the detector confidence from each accepted club sample. The replay
-reuses detections and reviewed indices; it does not run ViTPose again.
+缓存的输入中缺少原始的检测器置信度值。本次回放使用
+二值的有效/缺失权重，并明确记录了这一局限。对新视频的
+运行则使用每个被接受的球杆样本的检测器置信度。回放
+复用已有检测结果和审核过的索引，不会重新运行 ViTPose。
 
-| Metric | Previous run | New inputs + blended windows | Final constrained fit |
+| 指标 | 先前运行 | 新输入 + 窗口融合 | 最终约束拟合 |
 |---|---:|---:|---:|
-| Mean shaft–hosel distance, model m | 0.7502 | 0.7223 | 0.7302 |
-| Distance standard deviation, model m | 0.1099 | 0.0818 | <0.000001 |
-| Minimum distance, model m | 0.5418 | 0.3258 | 0.7302 |
-| Maximum distance, model m | 1.3091 | 0.9260 | 0.7302 |
-| Median projected-axis disagreement | 2.795° | 2.615° | 0.690° |
-| 90th percentile projected-axis disagreement | 12.129° | 10.629° | 1.979° |
-| Median weak-perspective projected-length relative error | 19.53% | 20.21% | 6.71% |
-| 90th percentile weak-perspective projected-length relative error | 53.77% | 53.19% | 14.82% |
+| 杆身–杆颈平均距离，模型 m | 0.7502 | 0.7223 | 0.7302 |
+| 距离标准差，模型 m | 0.1099 | 0.0818 | <0.000001 |
+| 最小距离，模型 m | 0.5418 | 0.3258 | 0.7302 |
+| 最大距离，模型 m | 1.3091 | 0.9260 | 0.7302 |
+| 投影轴向偏差中位数 | 2.795° | 2.615° | 0.690° |
+| 投影轴向偏差第 90 百分位数 | 12.129° | 10.629° | 1.979° |
+| 弱透视投影长度相对误差中位数 | 19.53% | 20.21% | 6.71% |
+| 弱透视投影长度相对误差第 90 百分位数 | 53.77% | 53.19% | 14.82% |
 
-Axis disagreement compares the predicted camera-XY shaft vector against the
-cached detected 2D vector on the same 170 jointly detected frames. It uses an
-orthographic direction approximation, not calibrated perspective reprojection.
-The earlier audit used smoothed input directions; those numbers are not directly
-comparable to this table, which uses the detected input directions.
+轴向偏差是在相同的 170 个两端同时检测到的帧上，将预测的相机 XY 平面杆身向量
+与缓存的 2D 检测向量进行比较。它采用
+正交投影的方向近似，而不是经过标定的透视重投影。
+早先的审计使用的是平滑后的输入方向；那些数字与本表
+不能直接比较，本表使用的是检测得到的输入方向。
 
-Projected-length relative error is `abs(s * length(predicted_vector.xy) -
-length(detected_vector_2d)) / length(detected_vector_2d)`, with both quantities in
-normalized image units and the body-derived weak-perspective scale described
-above. It measures agreement under this camera approximation, not true physical
-reprojection accuracy. Very short projected segments can inflate relative error.
+投影长度相对误差为 `abs(s * length(predicted_vector.xy) -
+length(detected_vector_2d)) / length(detected_vector_2d)`，其中两个量均以
+归一化图像单位表示，并使用上文所述、
+由身体推导出的弱透视尺度。它衡量的是在这种相机近似下的一致程度，而不是真实的物理
+重投影精度。投影长度很短的线段可能会放大相对误差。
 
-The input/window changes alone reduce the maximum length spike but introduce a
-shorter minimum. They are not sufficient by themselves. The final fixed length
-is true by construction, and closer agreement to 2D observations does not prove
-correct out-of-plane depth. The longest missing interval still has no direct
-club observations. No measured club length or ground-truth 3D was supplied.
+仅靠输入/窗口方面的改动，可以降低最大长度尖峰，但会引入
+更短的最小值。仅凭这些改动本身并不足够。最终的固定长度
+是由构造方式保证成立的，而与 2D 观测更加吻合也并不能证明
+平面外深度是正确的。最长的缺失区间仍然没有直接的
+球杆观测。本次未提供实测球杆长度或 3D 真值。
 
-The solver converged in 37 evaluations, using 170 reliable pairs and an inferred
-marker distance of 0.730154 m. Its weak-perspective median scale was 0.449729
-normalized-image units per model metre.
+求解器经过 37 次评估后收敛，使用了 170 个可靠端点对，推断的
+标记间距离为 0.730154 m。其弱透视尺度中位数为 0.449729
+归一化图像单位/模型米。
 
-## Verification and outputs
+## 验证与输出
 
-- All 17 tests passed with `python -m unittest discover -s tests -v`, including
-  five refinement tests and the 12 existing tests.
-- Tests cover angular gap reconstruction, preservation of observed endpoints,
-  exact 3D segment length, body preservation, head-marker offset preservation,
-  projection consistency on synthetic data, insufficient observations, invalid
-  lengths, NaN frames and window blending.
-- The output contains 364 written and independently decoded video frames.
-- P1–P10 stills were exported with the original reviewed indices.
-- The constraint left body/shaft coordinates unchanged relative to its MixSTE
-  input. Raw 2D observations and validity flags were preserved.
-- SHA-256 verification confirmed all 47 files in the source run were unchanged.
+- 使用 `python -m unittest discover -s tests -v` 运行的全部 17 项测试均通过，其中包括
+  五项精修测试和 12 项已有测试。
+- 测试覆盖角度式缺口重建、已观测端点的保留、
+  精确的 3D 线段长度、身体保持不变、杆头标记偏移的保留、
+  合成数据上的投影一致性、观测不足、无效
+  长度、NaN 帧以及窗口融合。
+- 输出包含 364 个已写入并经独立解码验证的视频帧。
+- P1–P10 静帧按原有的审核索引导出。
+- 相对于其 MixSTE 输入，该约束未改变身体/杆身坐标。
+  原始 2D 观测和有效性标志均被保留。
+- SHA-256 校验确认源运行中的全部 47 个文件均未被改动。
 
-Output folder:
-`runs/golf_pose_3d_club_refined_20261027/b85ed0b4db566e63bce190824c2f2196`.
+输出文件夹：
+`runs/golf_pose_3d_club_refined_20261027/b85ed0b4db566e63bce190824c2f2196`。
 
-It contains the AVI, impact preview, P1–P10 stills, NPZ arrays, workflow JSON,
-`validation.json`, `source_sha256.json` and `length_comparison.png`.
+其中包含 AVI 视频、击球预览图、P1–P10 静帧、NPZ 数组、工作流 JSON、
+`validation.json`、`source_sha256.json` 以及 `length_comparison.png`。
 
-## Running fresh input
+## 处理新输入
 
 ```powershell
 python -m golf_workflows.golf_pose_3d pro_refs/b85ed0b4db566e63bce190824c2f2196.mp4 --pose-backend vitpose-huge --lifter 17+5 --pose-cpu-threads 8 --club-refinement --positions-json runs/golf_pose_3d_vitpose_huge_17plus5/b85ed0b4db566e63bce190824c2f2196/selected_frames.json --output-dir runs/golf_pose_3d_club_refined_fresh
 ```
 
-Add `--club-marker-length-m DISTANCE` only with the measured distance between
-the intended shaft and hosel marker locations, in metres. Do not substitute a
-nominal driver length for this marker distance. Omit `--club-refinement` to
-retain the previous lifting behavior.
+仅当已实测预期的杆身与杆颈标记位置之间的距离（单位：米）时，
+才添加 `--club-marker-length-m DISTANCE`。不要用一号木（driver）的
+标称长度代替这一标记间距离。省略 `--club-refinement` 即可
+保留先前的 3D 提升行为。
 
-## Remaining accuracy work
+## 后续精度工作
 
-The most useful next evidence is labeled shaft/hosel positions and a measured
-marker distance. Calibrated multi-view or known-camera footage is needed to
-validate depth and physical projected length. A GolfPose-compatible five-point
-2D club model would address the missing head landmarks; this change does not
-train or import one. Endpoint identity rejection, better shaft-line extraction
-and supervision for difficult occlusions remain detector-stage improvements.
+接下来最有价值的证据是带标注的杆身/杆颈位置以及实测的
+标记间距离。要验证深度和物理投影长度，需要经过标定的多视角或已知相机参数的
+视频素材。与 GolfPose 兼容的五点
+2D 球杆模型可以解决杆头标记点缺失的问题；本次改动既没有
+训练也没有引入这样的模型。端点身份错误的剔除、更好的杆身直线提取，
+以及针对困难遮挡情况的监督，仍属于检测器阶段的改进。
 
-## Follow-up: swing interval refinement (2026-10-27)
+## 后续：挥杆区间精修（2026-10-27）
 
-The recent `w03` and `8b83acf159769157da0baa709a1fe55b` outputs exposed two
-independent problems: early club-trajectory speed dips truncated the lifted
-interval, and ball correction subsequently selected an impact outside that
-already-lifted interval. The 3D panel therefore displayed `outside swing` during
-the actual action. The label is temporal, not an inside-out/outside-in diagnosis.
+最近的 `w03` 和 `8b83acf159769157da0baa709a1fe55b` 输出暴露出两个
+相互独立的问题：球杆轨迹早期的速度下降截断了 3D 提升
+区间，而随后的球位修正又选取了一个位于该已提升区间之外的击球帧。
+因此，3D 面板在实际动作进行期间显示 `outside swing`。
+该标签指的是时间上处于挥杆区间之外，而不是由内向外/由外向内的挥杆轨迹诊断。
 
-### Changes
+### 改动
 
-- Added `detect_refined_phases` in `golf_workflows/swing_phases.py`, enabled by the
-  existing `--club-refinement` option (on by default in `workflow.py video`).
-- Timing now applies the 2D angular club preparation before choosing the 3D
-  interval. The rigid 3D fit remains after lifting, avoiding a circular dependency.
-- Club endpoint pairs farther than 0.8 median torso lengths from the wrists at
-  the grip are excluded from the phase track. This only changes timing inputs;
-  the raw observations and validity flags are preserved.
-- Body-relative wrist motion corroborates the club track. Root subtraction
-  reduces camera-translation effects; median root-to-thorax normalization reduces
-  image-scale dependence. Wrist height peaks/troughs with 25% of the sequence's
-  height-span prominence identify a backswing rise and subsequent return.
-- A genuinely observed club pair can refine contact within about 0.12 seconds of
-  the wrist return only when the head also returns near its address location.
-- Address includes a short pre-roll before sustained wrist displacement. Finish
-  requires raised hands and a roughly 0.25-second quiet hold, followed by a short
-  post-roll. The quiet threshold is 18% of the 95th-percentile wrist speed, with
-  a minimum of 0.08 torso units/second. Without a hold, retain the clip's tail
-  and record that uncertainty instead of clipping at the first speed dip.
-- Ball correction runs before interval selection/lifting. For corroborated
-  phases, search only within about 0.2 seconds of the wrist return and reject
-  head-to-ball distances exceeding 0.6 torso lengths. An initial bounded-search
-  trial still accepted false club points hundreds of pixels away; this distance
-  gate was added after reviewing those results.
-- The legacy option also applies ball correction before lifting and extends the
-  interval when needed. Reviewed frame indices remain authoritative.
-- Refined automatic P-position selection reserves intermediate frames for
-  P2/P6/P8/P10. In particular, P9 cannot consume the first frame after impact,
-  leaving no possible P8. The same geometric criteria remain; unsupported
-  positions are not replaced with uniformly spaced frame indices.
-- Run JSON now includes `phase_detection` diagnostics: method, observation
-  counts, wrist evidence, finish rule, fallback and ball-hint acceptance.
+- 在 `golf_workflows/swing_phases.py` 中新增 `detect_refined_phases`，由
+  已有的 `--club-refinement` 选项启用（在 `workflow.py video` 中默认开启）。
+- 时间判定现在会在选择 3D 区间之前先应用 2D 角度式球杆预处理。
+  刚性 3D 拟合仍在 3D 提升之后进行，以避免循环依赖。
+- 握把端距离手腕超过 0.8 个躯干长度中位数的球杆端点对，
+  会被排除在阶段轨迹之外。这只改变时间判定的输入；
+  原始观测和有效性标志均被保留。
+- 相对于身体的手腕运动用于佐证球杆轨迹。减去根节点（root）坐标
+  可减小相机平移的影响；以根节点到胸部距离的中位数做归一化，可减小
+  对图像尺度的依赖。显著性达到序列高度跨度 25% 的手腕高度峰/谷，
+  用于识别上杆（backswing）抬升及随后的回落。
+- 只有当杆头也回到其准备站位（address）位置附近时，真实观测到的球杆端点对
+  才能在手腕回落后约 0.12 秒的范围内精修触球时刻。
+- 准备站位包含手腕持续位移之前的一小段前置帧。收杆（finish）
+  要求双手抬起并保持约 0.25 秒的静止，之后再加一小段
+  后置帧。静止阈值为手腕速度第 95 百分位数的 18%，
+  下限为 0.08 躯干单位/秒。若没有静止保持，则保留片段尾部
+  并记录这一不确定性，而不是在第一次速度下降处截断。
+- 球位修正在区间选择/3D 提升之前运行。对于已得到佐证的
+  阶段，仅在手腕回落前后约 0.2 秒内搜索，并剔除
+  杆头到球的距离超过 0.6 个躯干长度的情况。最初的有界搜索
+  试验仍会接受距离数百像素之外的错误球杆点；这一距离
+  门限是在审查这些结果后加入的。
+- 旧版选项同样会在 3D 提升之前应用球位修正，并在需要时扩展
+  区间。审核过的帧索引仍具有最高优先级。
+- 精修后的自动 P 位置选择会为
+  P2/P6/P8/P10 预留中间帧。特别是，P9 不能占用击球后的第一帧，
+  否则 P8 将无帧可选。几何判据保持不变；缺乏证据支持的
+  位置不会被替换为均匀间隔的帧索引。
+- 运行 JSON 现在包含 `phase_detection` 诊断信息：方法、观测
+  计数、手腕证据、收杆规则、回退（fallback）以及球位提示是否被采纳。
 
-### Replay and results
+### 回放与结果
 
-The actual video processor was exercised on four recent clips using their saved
-2D observations. ViTPose was not repeated. Saved same-video ball locations were
-reused; a constant detection box recovered the original normalization affine.
-All 3D poses, intervals and automatic P selections were recomputed. Source runs
-were SHA-256 checked and remained unchanged.
+使用四个近期片段已保存的 2D 观测，对实际的视频处理器进行了
+测试。未重新运行 ViTPose。复用了同一视频已保存的球位置；
+用一个恒定的检测框还原了原始的归一化仿射变换。
+所有 3D 姿态、区间和自动 P 位置选择均已重新计算。源运行
+经 SHA-256 校验，保持未变。
 
-| Clip | Previous lifted interval | Refined interval | Refined impact | Ten-position result |
+| 片段 | 先前的提升区间 | 精修后区间 | 精修后击球帧 | 十个位置的结果 |
 | --- | --- | --- | --- | --- |
-| w01 | 19-52 | 21-57 | 45 | Complete; 92.2/100 |
-| w02 | 12-49 | 15-58 | 45 | Complete; 92.1/100 |
-| w03 | 3-13 | 5-51 | 38 | Complete; 90.2/100 |
-| 8b83acf159769157da0baa709a1fe55b | 39-50 | 41-93 | 65 | P5/P6 remain unavailable |
+| w01 | 19-52 | 21-57 | 45 | 完整；92.2/100 |
+| w02 | 12-49 | 15-58 | 45 | 完整；92.1/100 |
+| w03 | 3-13 | 5-51 | 38 | 完整；90.2/100 |
+| 8b83acf159769157da0baa709a1fe55b | 39-50 | 41-93 | 65 | P5/P6 仍不可用 |
 
-All indices are zero-based. These are observed algorithm changes, not
-ground-truth timing-accuracy measurements. The previous w03 impact was frame 14
-and the other failed clip's impact was frame 144, both outside their old lifted
-intervals. The new phases are ordered and lie inside the recomputed intervals.
+所有索引均从零开始。这些是观察到的算法变化，而不是
+基于真值的时间精度测量。先前 w03 的击球帧为第 14 帧，
+另一个失败片段的击球帧为第 144 帧，二者都位于各自旧的提升
+区间之外。新的各阶段顺序正确，且都位于重新计算的区间之内。
 
-The final AVI files independently decoded all 58, 59, 52 and 156 frames,
-respectively. Every frame inside each new interval has finite 3D coordinates.
-Raw 2D arrays and validity flags were preserved. All 27 tests passed, including
-missing-club timing, image-scale/camera-translation invariance, bounded/distance-
-gated ball correction and intermediate-frame reservation.
+最终的 AVI 文件经独立解码，分别完整得到 58、59、52 和 156 帧。
+每个新区间内的每一帧都具有有限的 3D 坐标。
+原始 2D 数组和有效性标志均被保留。全部 27 项测试通过，包括
+球杆缺失时的时间判定、图像尺度/相机平移不变性、有界搜索及距离
+门限的球位修正，以及中间帧预留。
 
-Outputs: `runs/phase_refinement_20261027/final/`. Each completed clip includes
-ten source/3D images, the explicit ten-pose bundle and `scoring/score.json`.
-`results.json` summarizes all four clips. The long club-gap clip remains flagged
-for review and has no complete ten-position score. Earlier trial outputs are
-retained one directory level above `final`.
+输出：`runs/phase_refinement_20261027/final/`。每个已完成的片段包含
+十张源图像/3D 图像、显式的十姿态包以及 `scoring/score.json`。
+`results.json` 汇总了全部四个片段。存在长时间球杆缺失的片段仍被标记为
+待审核，且没有完整的十位置评分。更早的试验输出
+保留在 `final` 的上一级目录中。
 
-The completed w03 result was also imported through `workflow.py video --from-run`
-to `runs/workflows/videos/w03_phase_refined`, making it the latest completed
-video bundle. The normal `workflow.py score` command was then run against it.
+已完成的 w03 结果还通过 `workflow.py video --from-run` 导入到
+`runs/workflows/videos/w03_phase_refined`，使其成为最新的已完成
+视频包。随后针对它运行了常规的 `workflow.py score` 命令。
 
-Reproducible replay scripts are `runs/phase_refinement_20261027/reprocess.py`
-and `update_positions.py`. Use a new `--output-dir` for a replay rerun.
+可复现的回放脚本为 `runs/phase_refinement_20261027/reprocess.py`
+和 `update_positions.py`。重新运行回放时请使用新的 `--output-dir`。
 
-### Remaining limitations
+### 遗留局限
 
-This is a single-swing heuristic, not a trained temporal action model. Long gaps,
-wrong-person body tracking, camera zoom/rotation, multiple swings, partial clips
-and unreliable club geometry can still require review. Conservative clip-end
-retention improves coverage but does not establish the exact finish time.
-The P5/P6 failure in the long club-gap clip is a landmark/pose-selection issue
-that interval refinement alone cannot resolve. The successful posture scores
-measure agreement with reference angles, not timing or reconstruction accuracy.
+这是一种针对单次挥杆的启发式方法，而不是经过训练的时序动作模型。长时间缺失、
+跟踪到错误人物的身体、相机缩放/旋转、多次挥杆、不完整片段
+以及不可靠的球杆几何，仍可能需要人工审核。保守地保留片段末尾
+可以提高覆盖率，但无法确定确切的收杆时刻。
+长时间球杆缺失片段中的 P5/P6 失败属于标记点/姿态选择问题，
+仅靠区间精修无法解决。成功得到的姿态评分
+衡量的是与参考角度的一致程度，而不是时间判定或重建精度。

@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "frame_index_base": 0,
+  "description": "Hand-labelled P1-P10 frame ranges [first, last] (inclusive, zero-based). A position missing from a clip is unlabelled, not absent. Seeded from frames visually reviewed on contact sheets during development; extend with more clips and positions.",
+  "status": "partial seed set",
+  "clips": {
+    "w09": {
+      "video": "pro_refs/w09.mp4",
+      "view": "down_the_line",
+      "handedness": "right",
+      "replay_run": "runs/workflows/videos/w09_autoroi_20261105",
+      "labels": {"p1": [6, 7], "p2": [12, 14], "p7": [31, 31], "p8": [32, 32], "p9": [33, 34], "p10": [39, 40]},
+      "notes": "Club still at 6; club dropped from 41. Lead arm occluded at 33, so P9 is 33 or 34."
+    },
+    "005": {
+      "video": "pro_refs/005.mp4",
+      "view": "down_the_line",
+      "handedness": "right",
+      "replay_run": ".tmp/club_005",
+      "labels": {"p1": [100, 108], "p8": [240, 244], "p9": [252, 254]},
+      "notes": "Takeaway starts about 104-106; P8 arms straight near 242."
+    },
+    "008": {
+      "video": "pro_refs/008.mp4",
+      "view": "face_on",
+      "handedness": "right",
+      "replay_run": ".tmp/club_008",
+      "labels": {"p1": [85, 92], "p2": [116, 122]},
+      "notes": "Clubhead leaves the ball about 93-97."
+    },
+    "010": {
+      "video": "pro_refs/010.mp4",
+      "view": "face_on",
+      "handedness": "right",
+      "replay_run": ".tmp/club_010",
+      "labels": {"p2": [80, 84], "p5": [153, 155]},
+      "notes": "P5 lead arm parallel in early downswing."
+    },
+    "w07": {
+      "video": "pro_refs/w07.mp4",
+      "view": "down_the_line",
+      "handedness": "right",
+      "replay_run": "runs/workflows/videos/w07_17plus2_20261104",
+      "labels": {},
+      "notes": "Not yet reviewed; replayed for regression only."
+    }
+  }
+}

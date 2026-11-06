@@ -1,291 +1,102 @@
-# Golf posture workflows
+# 高尔夫姿态工作流
 
-Run each stage with one command from `J:\Golf_Posture`:
+从一段挥杆视频中找出 P1–P10 十个关键帧，提升为 3D 姿态，并与十个职业参考姿态逐一比较评分。项目有两个相互独立的工作流，2D 检测方式不同，从 2D 关键点开始的帧识别、3D 提升和评分完全共用。
 
-```powershell
-python workflow.py references
-python workflow.py video pro_refs/b85ed0b4db566e63bce190824c2f2196.mp4
-python workflow.py score
-```
-
-These commands build ten references, identify ten video poses, then score the
-saved poses against the references. Scoring defaults to the latest completed
-reference/video workflows. Use `python workflow.py <stage> --help` for options.
-
-Shared code is in `golf_workflows/`; generated files are in `runs/workflows/`.
-The workflow entry point defaults to ViTPose-Huge body pose, the fine-tuned
-five-landmark GolfPose club ViTPose model, GolfPose 17+5, and club refinement
-for video. All five club inputs are stored with their own confidence/valid flag.
-See [WORKFLOW.md](WORKFLOW.md) for output contracts, reviewed-frame overrides,
-cached-run reuse and the exact scoring inputs. Existing model files and earlier
-runs are preserved. The notes below describe earlier experiments.
-
----
-
-# Attempt 1
-
-Pose prediction on the images in `images/` using Ultralytics YOLO26n-pose (`yolo26n-pose.pt`), the COCO-keypoint model described in the [pose estimation docs](https://docs.ultralytics.com/tasks/pose).
-
-## How to run
+在项目文件夹中，用项目虚拟环境运行（环境配置见 [WORKFLOW.md](WORKFLOW.md) 第 6 节）：
 
 ```powershell
-pip install ultralytics
-python predict_pose.py
+cd J:\Golf_Posture
 ```
 
-The script loads every image under `images/`, draws the predicted skeleton, and writes:
-
-- annotated images in `runs/pose/predict/`
-- joint coordinates in `runs/pose/predict/keypoints.json`
-
-Each person record has the 17 COCO joints (nose through both ankles), pixel `x`/`y`, per-joint confidence, and the person box.
-
-## Outcome
-
-| Item | Result |
-| --- | --- |
-| Images predicted | 178 |
-| Inference | 22.6 ms per image at 640×640 |
-| One person | 172 images |
-| Three people | `pro_part_01.png` through `pro_part_04.png` |
-| Eight people | `pro_sequence.jpg` and `pro_sequence.png` |
-| Keypoints | 3,400 |
-| Keypoints below 0.5 confidence | 716 |
-| People with a wrist below 0.5 | 106 |
-| Keypoint confidence | min 0.006, median 0.977, mean 0.787 |
-
-Single-golfer swing frames are detected reliably. The pro reference sheets are collages, so the model returns a skeleton for every figure in the sheet. Median joint confidence is high, but wrists and other occluded joints drop out often enough that a swing angle built from those points would be unstable.
-
-## Possible future improvements
-
-- Split `pro_part_*` and `pro_sequence` into one golfer per image, or keep only the intended person (largest box, or the figure nearest the image center). The current JSON treats every detected figure as a golfer.
-- Drop or interpolate joints under a confidence cutoff, especially wrists. 106 of the detected people have at least one weak wrist, which is the joint a club-shaft estimate depends on.
-- Track one golfer across each swing sequence and smooth joint paths over time. Each frame is predicted on its own, so a joint can jump when the far arm is hidden behind the body.
-- Compute golf measures from the keypoints that are already saved: spine tilt, shoulder tilt, hip line, knee flex, and lead-wrist position. The JSON currently stops at raw coordinates.
-- Map COCO left/right to lead and trail side once the camera view (face-on or down-the-line) and the golfer’s handedness are known.
-- Move from YOLO26n-pose to a larger pose checkpoint when joint placement matters more than the current 22.6 ms. The nano model is the lowest-accuracy pose variant in that family.
-- Raise `imgsz` above 640, or crop to the golfer before inference, so wrists and ankles keep more pixels.
-- Add club, grip, and ball points. The 17 COCO joints do not include the club, so posture relative to the shaft is not measured yet.
-- Deduplicate repeated swing copies in `images/` before comparing attempts, so the same frames are not counted more than once.
-
-# Swing plane trace
-
-`trace_swing_plane.py` draws the smoothed clubhead path on one video, from the first accepted shaft through the last. The club mask comes from the trained YOLO26n-seg weights. YOLO26n-pose supplies the hands so the grip end of that mask can be separated from the clubhead.
-
-The script expects `runs/segment/golf_club_train/weights/best.pt`, produced by `prepare_golf_club_seg.py` and `train_golf_club_seg.py`, and the pose checkpoint `yolo26n-pose.pt`.
-
-## How to run
+## 1. YOLO26n 工作流（`workflow.py`）
 
 ```powershell
-pip install ultralytics
-python -m golf_workflows.trace_swing_plane
-python -m golf_workflows.trace_swing_plane user_swings\1785648828688618000_swing.mp4
-python -m golf_workflows.trace_swing_plane user_swings\1785648828688618000_swing.mp4 --mediapipe-wrists
+.\.venv\Scripts\python.exe workflow.py references
+.\.venv\Scripts\python.exe workflow.py video pro_refs/w07.mp4
+.\.venv\Scripts\python.exe workflow.py score
 ```
 
-With no path, the script picks a random video under `user_swings/`. Accepted extensions are `.mov`, `.mp4`, `.avi`, `.mkv`, and `.webm`.
+- 人体：双类 YOLOX（`golfpose_detector_2cls_yolox_s.pth`，类别 person/club）给出人物框，框内运行 YOLO26n 人体姿态（`yolo26n-pose.pt`）。
+- 球杆：YOLOX 的球杆框内运行仅球杆的 ViTPose-H（`golfpose_club_ViTPose_huge.pth`），只用握把 `shaft` 与杆颈 `hosel` 两点。
+- 输出：`runs/workflows/`。
 
-## Workflow
-
-Each frame is handled in one pass. The path on screen is only what has been accepted up to that frame.
-
-1. **Pose.** YOLO26n-pose reads the video at `imgsz` 640. If several people are found, the largest box is the golfer.
-2. **Hands.** The anchor is the mean of the wrists whose confidence is at least 0.25. If both wrists are weak, the shoulders are used. If those are missing too, the center of the golfer’s box is used.
-3. **Club.** The trained segmentation model runs on the same frame (`conf` 0.25, retina masks, at most 3 detections). Only boxes whose class name is a golf club are kept.
-4. **Shaft.** The club contour’s major axis is the shaft. Contours shorter than 12 pixels are ignored. A contour whose major/minor variance ratio is below 8 is treated as a clubhead point only, with no grip, so a round false mask does not invent a shaft.
-5. **Ends.** The shaft end nearer the hands is the grip. The other end is the clubhead. With no hands and no earlier clubhead, the lower end is the clubhead.
-6. **Choice.** When more than one club mask is present, the winner is the longer, more elongated detection whose grip sits nearer the hands.
-7. **Stability.** A clubhead that jumps more than 45% of the frame diagonal within 6 frames is dropped. On the next frame, the new shaft is blended toward the previous one (72% new) so the plane does not jitter. A gap longer than 6 frames starts a new segment and is not joined to the earlier path.
-8. **Phases.** After the clip is read, `swing_phases.py` labels address, top, impact, and follow-through from the clubhead path (wrist height only if the club is missing). The path color runs through those phases instead of a single start-to-finish ramp.
-9. **Draw.** The video is written on a second pass so every frame can use the phase labels. The video’s frame rate comes from the pose reader, falling back to 30.
-
-## What is drawn
-
-Color runs from blue at the first sample to red at the latest sample.
-
-- A smoothed clubhead path for linked samples. Each step is drawn as eight short sections of a curve, or as straight sections when a curve cannot be fit. A ring marks the first clubhead.
-- A filled dot on the current clubhead, when this frame produced a sample.
-- A small legend labeled start and finish.
-
-## Output
-
-Files are written under `runs/swing_plane/`, using the source video’s stem:
-
-- `*_swing_plane.avi` — the clubhead path building from the start of the clip to the end
-- `*_swing_plane.jpg` — the last frame, with the full path
-- `*_swing_plane.json` — phase frame indexes, plus one record per accepted sample: frame index, confidence, whether it continues the previous sample (`linked`), grip `[x, y]` or `null`, and clubhead `[x, y]`
-- `*_phases.png` — smoothed clubhead height and speed, with the phase lines marked
-
-## Example
-
-| Item | Result |
-| --- | --- |
-| Source | `user_swings/1785648828688618000_swing.mp4` |
-| Frames written | 66 |
-| Swing-plane samples | 53 |
-| Video | `runs/swing_plane/1785648828688618000_swing_swing_plane.avi` |
-| Still | `runs/swing_plane/1785648828688618000_swing_swing_plane.jpg` |
-
-# GolfPose 3D
-
-`golf_pose_3d.py` lifts each swing video to a 3D golfer and club with GolfPose-3D, the MixSTE2 model from [GolfPose](https://github.com/MingHanLee/GolfPose) (ICPR 2024). The 2D input comes from the same Ultralytics models used above: YOLO26n-pose for the golfer and the trained YOLO26n-seg weights for the club. The GolfPose MMPose and MMDet 2D models are not used. Their environment is Linux-only and built for CUDA, while this project runs on Windows on CPU.
-
-## Setup
+## 2. GolfPose 联合工作流（`python -m golfpose_workflow`）
 
 ```powershell
-pip install ultralytics einops timm==0.9.16 local-attention==1.9.0 mediapipe scipy
+.\.venv\Scripts\python.exe -m golfpose_workflow --reference
+.\.venv\Scripts\python.exe -m golfpose_workflow --video pro_refs/w07.mp4
+.\.venv\Scripts\python.exe -m golfpose_workflow --score
 ```
 
-- The model code is vendored unchanged in `third_party/golfpose/common/`, with the GolfPose `LICENSE` and the source commit in `third_party/golfpose/SOURCE.txt`. The file imports the older `timm.models.helpers` API, so timm is pinned to 0.9.16.
-- Put the checkpoint at `golfpose_checkpoints/golfpose_17+2_33.6_30.5_59.5.bin`. It is the GolfPose-3D (GC) N=19 row in the GolfPose README and is about 406 MB.
+- 单类 YOLOX（`golfpose_detector_1cls_yolox_s.pth`，类别 golfer）给出球手框，框内运行 22 点联合 ViTPose-H（`golfpose_golfer_ViTPose_huge.pth`），一次得到人体和球杆。
+- 低置信度人体关节由 YOLO26n 补充（`--no-body-fusion` 关闭）。杆跟/杆趾三点被丢弃。
+- 输出：`runs/golfpose_workflow/`。详见 [golfpose_workflow/README.md](golfpose_workflow/README.md)。
 
-## How to run
+## 3. 共用框架
 
-```powershell
-python -m golf_workflows.golf_pose_3d
-python -m golf_workflows.golf_pose_3d user_swings\1785648828688618000_swing.mp4
-python -m golf_workflows.golf_pose_3d --all
-python -m golf_workflows.golf_pose_3d user_swings\1785648828688618000_swing.mp4 --mediapipe-wrists
-```
+两个工作流的视频命令都走 `golf_workflows/golf_pose_3d.py`：
 
-With no path, a random video under `user_swings/` is used. `--all` processes every video there and loads the models once.
+1. **球手 ROI**：YOLO26n 在 12 个采样帧上找出球手，作为 YOLOX 漏检时的默认裁剪区域（`--golfer-box` 可手动指定，`--no-auto-golfer-box` 关闭）。
+2. **逐帧 2D 检测**，并自动纠正漂移的人体框：骨架不完整时，在上一帧骨架范围和球手 ROI 中重试。球杆置信度低时沿预测杆身重新裁剪一次。
+3. **视角与左右手习惯**：默认自动判断（`--view`、`--handedness` 可手动指定）。
+4. **球杆跟踪**：以双手为锚点的刚性杆卡尔曼/RTS 跟踪，纠正握把/杆颈互换、剔除误检；检测不可靠时补充运动模糊条纹和分割掩膜的杆身角度（`--no-club-mask` 关闭掩膜）。
+5. **阶段识别（2D）**：P1、P4、送杆结束；P7 以击球瞬间为准——球离开原位、杆头到达球优先，动作捕捉（杆头回位、手腕回落）其次。
+6. **骨架质量检查**：挥杆窗口内骨架丢失过久时打印 `ERROR:` 并中止（`--allow-skeleton-gaps` 改为警告）。
+7. **3D 提升**：MixSTE2 17+2（`golfpose_17+2_33.6_30.5_59.5.bin`），只提升 P1 到送杆结束的窗口，并拟合刚性球杆。
+8. **其余位置（3D）**：P2、P3、P5、P6、P8、P9、P10 分段用动态规划联合选取，附带每个位置的置信度和亚帧时间。
+9. **导出与评分**：十个源帧、十张 3D 图和坐标包；评分按 P1 对 P1……P10 对 P10 计算 14 项姿态角度的相似度。
 
-## Workflow
+帧识别规则的完整说明见 [FRAME_RECOGNITION.md](FRAME_RECOGNITION.md)，评分公式见 [SCORING_METHODOLOGY.md](SCORING_METHODOLOGY.md)，流程细节与修改记录见 [WORKFLOW.md](WORKFLOW.md)。
 
-1. **2D detection.** Each frame goes through YOLO26n-pose and the club segmentation model. The golfer, hands, club choice, and jump filter are the ones in `trace_swing_plane.py`, so the 2D clubhead matches the swing-path script.
-2. **Keypoint conversion.** GolfPose expects 17 body joints in Human3.6M order, followed by club points. COCO joints are converted as follows:
-   - Hips, knees, ankles (as feet), shoulders, elbows, and wrists map directly.
-   - `root` is the midpoint of the hips, `thorax` is the midpoint of the shoulders, and `spine` is the midpoint of `root` and `thorax`.
-   - `neck_base` is halfway from `thorax` to the nose. `head` is 25% beyond the ears and eyes, measured away from `thorax`.
-   - The club’s grip end becomes `shaft` and its clubhead end becomes `hosel`, which gives the 17+2 layout.
-   - Joints below 0.25 confidence are treated as missing.
-3. **Gap filling and smoothing.** Missing joints and club points are filled by linear interpolation over time, and the first or last good value is held at the ends of the clip. Each filled joint is then smoothed with a short moving average (about 0.15 s, same idea as GolfPosePro’s wrist filter) before the 3D model sees it.
-4. **Phases.** Address, top, impact, and follow-through come from `swing_phases.py`. The 3D lift uses only that window, so idle frames before address and after the finish are not padded into the model.
-5. **Normalization.** GolfPose was trained on 1280x720 cameras. The swing is centered on the golfer and scaled so the median golfer box is 70% of a virtual 1280x720 canvas. It is then normalized as in GolfPose: x and y are divided by the width, multiplied by 2, and shifted by `[1, h / w]`.
-6. **3D lift.** MixSTE2 runs on CPU with 243-frame windows, at about 3 seconds per window:
-   - Clips shorter than 243 frames are padded by repeating the last frame.
-   - Longer clips use more windows, with the last one aligned to the end of the clip.
-   - Each window is averaged with its mirror (x negated and left and right swapped), as in GolfPose evaluation.
-   - The output is root-relative, in meters, in camera axes.
-7. **Render.** The left panel is the video frame with the converted 2D skeleton and the smoothed 2D clubhead path, colored by swing phase. The right panel is a 3D view with the skeleton, the club as a shaft-to-hosel line, and the 3D hosel path. Frames outside the phase window are left blank on the 3D side.
+## 4. 输出
 
-`--mediapipe-wrists` on either script fills a YOLO wrist below 0.25 confidence from MediaPipe Pose when that landmark is visible. It does not replace the pose model or the club segmentation.
-
-## Output
-
-Files are written under `runs/golf_pose_3d/`, using the source video’s stem:
-
-- `*_3d.avi` — the side-by-side video
-- `*_3d.jpg` — the last frame of that video
-- `*_3d.npz` — `joints` (19 names), `keypoints_2d` and `keypoints_2d_valid` (pixels and the per-joint detected flag), `keypoints_2d_filled`, `keypoints_2d_normalized` (the model input), `keypoints_3d` (frames × 19 × 3, meters), `fps`, `frame_size`
-- `*_3d.json` — the checkpoint, frame counts, normalization values, frames with a detected club, interpolated frames per joint, and the mean and standard deviation of every 3D bone length
-
-## Example
-
-| Item | `1785648828688618000_swing.mp4` | `1785642572528296000_swing.mov` |
+| 阶段 | YOLO26n 工作流 | GolfPose 联合工作流 |
 | --- | --- | --- |
-| Frames | 66 | 331 |
-| Address / top / impact / finish | 11 / 27 / 44 / 54 | 144 / 160 / 177 / 187 |
-| 3D window | frames 11–54, one padded window | frames 144–187, one padded window |
-| Club detected | 53 frames | 270 frames |
-| Forearm length variation in that window | about 2 cm | about 2 cm |
-| Shaft-to-hosel length | 0.54 ± 0.19 m | 0.54 ± 0.19 m |
+| 参考 | `runs/workflows/references/` | `runs/golfpose_workflow/references/` |
+| 视频 | `runs/workflows/videos/<视频名>_<时间戳>/` | `runs/golfpose_workflow/videos/<视频名>_<时间戳>/` |
+| 评分 | `runs/workflows/scores/<视频运行名>/` | `runs/golfpose_workflow/scores/<视频运行名>/` |
 
-The long clip’s speed peak is frame 177, the same frame chosen as impact. Frames outside that window stay in the 2D path and are left blank in the 3D view.
+每个完成的视频运行包含 `P1.jpg`–`P10.jpg`、`P1_3d.jpg`–`P10_3d.jpg`、`identified_frames.npz/json`、完整序列 `<stem>_3d.npz`、识别依据 `<stem>_3d.json`、`skeleton_diagnostics.json` 和渲染视频 `<stem>_3d.avi`。只有十个帧号互不相同、递增且 3D 姿态全为有限值时才算完成，并更新该工作流的最新结果指针。
 
-## Limitations
-
-- GolfPose-3D was trained on ground-truth 2D from its own motion-capture set. Here, `neck_base`, `head`, and `spine` are estimated from COCO joints and YOLO adds noise, so expect more error than the paper’s 33.6 mm. `neck_base` is the least stable joint when the nose is hidden or the golfer looks down at the ball.
-- The 3D shaft length remains a learned MixSTE prior unless a measured marker distance is supplied. Five-point 2D supervision improves projected geometry, but it does not turn the uncalibrated reconstruction into a physical club-length measurement.
-- Heel and toe points are available from the club ViTPose model, but occlusion and broad fallback crops can produce low-confidence outputs. Raw coordinates and confidence are retained; unreliable points are marked invalid and imputed only in the filled 3D input.
-- Output is root-relative. Overall position, and the absolute scale from the camera, are not measured.
-
-# Swing phases
-
-`swing_phases.py` is the temporal layer adapted from [GolfPosePro](https://github.com/ryanboscobanze/GolfPosePro). That notebook tracks a MediaPipe wrist and cuts the swing from its height and speed. Here the same cuts use the segmented clubhead, because a wrist is only a stand-in for the club.
-
-- Smooth the path with `scipy.ndimage.uniform_filter1d` (about 0.15 s).
-- Speed is `np.gradient` of that path.
-- **Address** is the frame before speed stays above 12% of the peak.
-- **Top** is the clubhead farthest from the address position, before impact.
-- **Impact** is the fastest frame that has returned near the address position.
-- **Follow-through** is where speed falls below 35% of the impact speed.
-
-Wrist height is used only when fewer than eight clubhead samples exist. `--mediapipe-wrists` is optional and only patches weak YOLO wrists.
-
-
-## Experimental 17+5 lifter
-
-`golfpose_17+5_39.2_32.3_62.8.bin` is a 22-joint MixSTE2 checkpoint: 17 body joints plus `shaft`, `hosel`, `heel`, `toe_down`, and `toe_up`. Its learned spatial embedding is `[1, 22, 512]`, and its temporal embedding is `[1, 243, 512]`. It cannot accept a 15+5 / 20-point tensor or the existing 19-point tensor directly.
-
-Both lifter sizes are supported. The original 17+2 checkpoint remains the default and its file is preserved. The 17+5 mode has a separate default output directory.
+对指定的运行评分：
 
 ```powershell
-python -m golf_workflows.standard_frames --lifter 17+5 --input-dir pro_refs/Standard_10_frames --output-dir runs/standard_frames_17plus5_20261027
-python -m golf_workflows.golf_pose_3d user_swings/<swing>.mp4 --lifter 17+5 --output-dir runs/golf_pose_3d_17plus5
-
-# Original model and reference generation:
-python -m golf_workflows.standard_frames --lifter 17+2
+.\.venv\Scripts\python.exe workflow.py score runs/workflows/videos/<视频运行名> --references runs/workflows/references
+.\.venv\Scripts\python.exe -m golfpose_workflow --score --run runs/golfpose_workflow/videos/<视频运行名> --references runs/golfpose_workflow/references
 ```
 
-The default `workflow.py` path now uses `golfpose_club_ViTPose_huge.pth` to
-observe all five club landmarks. The segmentation model still selects the golf
-club and supplies the crop; the ViTPose-Huge heatmaps supply `shaft`, `hosel`,
-`heel`, `toe_down`, and `toe_up` in that exact order. A landmark below the
-confidence cutoff remains NaN/False and is interpolated only in the filled model
-input. Use `--club-pose-backend segmentation --lifter 17+2` to restore the
-earlier two-proxy path.
+## 5. 常用选项
 
-A trial of the locally saved 22-keypoint DEKR model on the P1 face-on reference returned very low-confidence, out-of-golfer predictions. It was not incorporated as a source of measured landmarks. The DEKR checkpoint file remains available.
+两个视频命令都支持：
 
-The new reference run writes all 22 predicted joints, separate camera and fused reference renderings, raw 2D points, per-joint validity, filled 2D inputs, and imputation metadata. Reference fusion uses the same face-on/down-the-line method as before, with alignment chosen from the existing body/shaft bones. `runs/standard_frames/` is preserved and remains the scoring default.
+| 选项 | 作用 |
+| --- | --- |
+| `--view auto\|face_on\|down_the_line` | 拍摄视角，默认自动 |
+| `--handedness auto\|right\|left` | 左右手习惯，默认自动 |
+| `--golfer-box X1 Y1 X2 Y2`、`--no-auto-golfer-box` | 手动球手 ROI / 关闭自动 ROI |
+| `--positions-json <文件>` | 使用人工复核的 P1–P10 帧号 |
+| `--allow-skeleton-gaps` | 骨架丢失时只警告、不中止 |
+| `--no-club-mask` | 不用分割掩膜测杆身角度 |
+| `--no-club-refinement` | 关闭球杆精修，退回旧的速度规则 |
+| `--track-club-path` | 渲染杆头轨迹 |
+| `--club-marker-length-m <米>` | 提供实测的握把到杆颈距离 |
+| `--pose-cpu-threads <n>` | CPU 线程数 |
+| `--output-dir <空文件夹>` | 指定输出目录 |
 
-Reference club visualization does not rescale or attach the club to the wrists.
-If a view has all five reliable GolfPose landmarks, its aligned MixSTE club can
-be saved separately as `reference_3d_club_overlay.jpg` and
-`reference_3d_club_overlay` in `joints.npz`. The numerical `reference_3d` used
-for scoring is never replaced by this overlay.
-The ordinary `reference_3d.jpg` is rendered body-only to avoid presenting
-imputed or out-of-frame club channels as observed geometry.
-
-Use the paper's separate-club detector route with
-`--club-crop-backend official-yolox-2cls`. It runs the released two-class
-YOLOX-s checkpoint (`person`, `club`) and passes the selected club box to
-`golfpose_club_ViTPose_huge.pth`. The existing segmentation crop remains the
-default and can be selected explicitly with `--club-crop-backend segmentation`.
-
-Official joint schema: https://github.com/MingHanLee/GolfPose/blob/main/configs/mmpose/_base_/datasets/golfswing_golfer.py
-
-
-## ViTPose-Huge 2D backend with the 17+5 lifter
-
-The saved COCO ViTPose-Huge checkpoint is available through `--pose-backend vitpose-huge` in both `standard_frames.py` and `golf_pose_3d.py`. The existing `yolo26n-pose` backend remains the default.
+`workflow.py video` 还支持 `--from-run <运行目录>`（不重跑模型，直接从已有运行导出十个姿态）。查看全部选项：
 
 ```powershell
-python -m golf_workflows.standard_frames --pose-backend vitpose-huge --club-pose-backend vitpose-huge --lifter 17+5 --input-dir pro_refs/Standard_10_frames --output-dir runs/standard_frames_vitpose_huge_17plus5
-python -m golf_workflows.golf_pose_3d user_swings/<swing>.mp4 --pose-backend vitpose-huge --club-pose-backend vitpose-huge --lifter 17+5 --output-dir runs/golf_pose_3d_vitpose_huge_17plus5
+.\.venv\Scripts\python.exe workflow.py video --help
+.\.venv\Scripts\python.exe -m golfpose_workflow --help
 ```
 
-The preserved YOLO26n-pose model locates the golfer's box. ViTPose-Huge replaces its body keypoints using a padded UDP crop at 256x192, RGB normalization, original/mirrored heatmap averaging, and MMPose's UDP/DARK decoder. Video frames use box-IoU association to follow the same golfer, with largest-box selection when no match exists. Single reference pictures are processed independently.
-
-`vitpose_tracking.py` implements the 32-layer, 1280-dimensional transformer and heatmap head with native PyTorch CPU operators. All released state tensors load strictly; training-only dropout is disabled. The COCO body export retains an unused class token and 193 position slots, while the GolfPose club export correctly loads its newer no-class-token, 192-position layout. This avoids requiring MMPreTrain or MMCV compiled operators in the current Windows environment. The ViTPose backend defaults to four PyTorch CPU threads; the video CLI can override this with `--pose-cpu-threads`. Decoder source attribution and license are in `third_party/golfpose/VITPOSE_SOURCE.txt` and `MMPOSE_LICENSE`.
-
-The 17 COCO body landmarks are converted to the existing GolfPose body order.
-The separate club ViTPose checkpoint uses the same 192x256 UDP/DARK inference
-implementation with a five-channel head. It consumes the selected segmentation
-box and populates joints 17-21 directly. `joints.npz` and video `*_3d.npz` retain
-the raw coordinates, validity mask, filled input, and five confidence values so
-measured and interpolated landmarks remain distinguishable.
-
-Each reference view's `joints.json` records ViTPose's raw COCO coordinates, confidence responses, crop affine matrix, inference time, and the converted GolfPose joints. `joints.npz` stores 22-joint 2D/3D arrays and validity/filling information. The new run also provides comparison overviews and validation records. Existing reference folders and checkpoints are preserved; no new reference set is automatically selected for scoring.
-
-
-For the reviewed `b85ed0b4db566e63bce190824c2f2196.mp4` video trial:
+## 6. 测试与基准
 
 ```powershell
-python -m golf_workflows.golf_pose_3d pro_refs/b85ed0b4db566e63bce190824c2f2196.mp4 --pose-backend vitpose-huge --lifter 17+5 --pose-cpu-threads 8 --positions-json runs/golf_pose_3d/b85ed0b4db566e63bce190824c2f2196/selected_frames.json --output-dir runs/golf_pose_3d_vitpose_huge_17plus5
+.\.venv\Scripts\python.exe -m unittest discover -s tests
+.\.venv\Scripts\python.exe -m golf_workflows.benchmark evaluate <视频运行目录>
 ```
 
-`--positions-json` reuses the visually reviewed zero-based P1-P10 indices while calculating fresh 2D and 3D poses. It validates the source filename, coverage, ordering and frame bounds. Reviewed impact is retained rather than replaced by ball proximity. Video timestamps describe the edited slow-motion source. Omitting this option keeps automatic position selection.
+人工标注的帧范围在 `benchmarks/p_position_labels.json`。
 
-`--pose-cpu-threads` defaults to four. A timing check on the current CPU selected eight for this video; the heatmap differences from four threads were below `4e-7`. Source checkpoints and prior outputs are preserved. The video trial is saved separately under `runs/golf_pose_3d_vitpose_huge_17plus5/`.
+早期实验（COCO 单图测试、分割掩膜杆头轨迹、GolfPosePro 速度分段、17+5 与 COCO ViTPose 后端等）的说明已移出本文，原文保存在 `archive/docs_zh_20261106/` 和 `archive/docs_en/`。

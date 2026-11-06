@@ -1,10 +1,8 @@
-"""Lift golf swings to 3D with GolfPose-3D, using Ultralytics for the 2D input.
+"""Lift golf swings with GolfPose MixSTE2 17+2 or 17+5.
 
-2D comes from the same models as trace_swing_plane.py: YOLO26n-pose for the
-golfer and the trained YOLO26n-seg weights for the club. COCO joints are
-converted to the Human3.6M order GolfPose expects, the club's grip end becomes
-"shaft" and its clubhead end becomes "hosel", and the 17+2 MixSTE2 checkpoint
-from https://github.com/MingHanLee/GolfPose lifts each swing to 3D.
+The joint 22-point GolfPose ViTPose predicts the body and club together in native
+GolfPose order; 17+2 keeps its body, shaft and hosel. Legacy COCO-body and
+separate club backends remain selectable.
 
 Usage:
     python -m golf_workflows.golf_pose_3d
@@ -34,7 +32,7 @@ from ultralytics import YOLO, YOLOE
 
 from predict_pose import ROOT
 from predict_seg import MODEL_PATH
-from golf_workflows.swing_phases import SwingPhases, WristFallback, detect_phases, detect_refined_phases, find_checkpoint_frames, smooth_keypoints, wrist_shaft_degrees
+from golf_workflows.swing_phases import RELIABLE_CLUB_CONFIDENCE, SwingPhases, WristFallback, detect_phases, detect_refined_phases, find_checkpoint_frames, smooth_keypoints, wrist_shaft_degrees
 from golf_workflows.trace_swing_plane import (
     CLUB_CONFIDENCE,
     KEYPOINT_CONFIDENCE,
@@ -122,10 +120,12 @@ def joint_names(count: int) -> list[str]:
 
 
 def pad_keypoints(points: np.ndarray, valid: np.ndarray, count: int) -> tuple[np.ndarray, np.ndarray]:
-    """Add unavailable 2D landmarks without marking them as measured."""
+    """Match the lifter: add unavailable landmarks unmeasured, or drop heel/toe for 17+2."""
     joint_names(count)
     if points.shape[-2] == count:
         return points.copy(), valid.copy()
+    if points.shape[-2] == 22 and count == 19:
+        return points[..., :19, :].copy(), valid[..., :19].copy()
     if points.shape[-2] != 19 or count != 22:
         raise ValueError(f"Cannot convert {points.shape[-2]} joints to {count}")
     missing = np.full((*points.shape[:-2], 3, 2), np.nan, dtype=points.dtype)
@@ -138,7 +138,12 @@ def swing_for_lifter(swing: Swing2D, lifter: torch.nn.Module) -> Swing2D:
     if swing.points.shape[1] == count:
         return swing
     points, valid = pad_keypoints(swing.points, swing.valid, count)
-    return replace(swing, points=points, valid=valid, filled=fill_gaps(points, valid))
+    scores = {}
+    if count < swing.points.shape[1]:
+        scores = dict(
+            keypoint_confidence=None if swing.keypoint_confidence is None else swing.keypoint_confidence[:, :count],
+            club_confidence=None if swing.club_confidence is None else swing.club_confidence[:, :count - BODY_JOINTS])
+    return replace(swing, points=points, valid=valid, filled=fill_gaps(points, valid), **scores)
 
 # COCO index for each GolfPose joint that maps one to one.
 DIRECT_FROM_COCO = {
@@ -175,6 +180,14 @@ VIEW_AZIM = 70.0
 PANEL_ZOOM = 1.2
 BALL_MODEL = ROOT / "yoloe-26n-seg.pt"
 BALL_CONFIDENCE = 0.15
+# A ball within this fraction of the torso length of its address spot has not moved.
+BALL_SPOT_RADIUS = 0.12
+# Camera pan/zoom allowance between address and the downswing, in torso lengths.
+BALL_DRIFT = 0.5
+# A teed ball in a wide shot is only a few pixels wide; 640 px inference misses it.
+BALL_PRESENCE_IMAGE_SIZE = 1280
+# Clubhead approach is extrapolated only from within this multiple of the contact distance.
+APPROACH_NEAR = 2.0
 BALL_AREA_FRACTION = 0.02
 POSITION_NAMES = {
     "p1": "address",
@@ -202,6 +215,10 @@ class Swing2D:
     samples: list[ClubSample]
     wrist_y: np.ndarray
     club_confidence: np.ndarray | None = None
+    keypoint_confidence: np.ndarray | None = None
+    detector_details: list[dict] | None = None
+    predicted_shaft_crops: list[dict] | None = None
+    body_fusion: dict | None = None
 
 
 def bone_side(a: str, b: str) -> str:
@@ -285,6 +302,8 @@ def fill_gaps(points: np.ndarray, valid: np.ndarray) -> np.ndarray:
 
 def detect_2d(video: Path, pose_model: YOLO, club_model: YOLO | None, wrists: WristFallback | None = None,
               club_pose_model=None, track_club_path: bool = False, club_crop_model=None) -> Swing2D:
+    if getattr(pose_model, "joint_pose", False) is True:
+        return pose_model.detect_sequence(video, track_club_path=track_club_path)
     pose_results = pose_model.predict(source=str(video), imgsz=640, stream=True, verbose=False)
     rows: list[np.ndarray] = []
     flags: list[np.ndarray] = []
@@ -292,6 +311,11 @@ def detect_2d(video: Path, pose_model: YOLO, club_model: YOLO | None, wrists: Wr
     samples: list[ClubSample] = []
     swing_wrist_y: list[float] = []
     club_confidences: list[np.ndarray] = []
+    body_confidences: list[np.ndarray] = []
+    detector_rows = []
+    predicted_crops: list[dict] = []
+    from golf_workflows.club_tracking import ShaftPredictor
+    shaft_predictor = ShaftPredictor(RELIABLE_CLUB_CONFIDENCE)
     size = (0, 0)
     for frame_index, pose_result in enumerate(pose_results):
         frame = pose_result.orig_img
@@ -301,6 +325,9 @@ def detect_2d(video: Path, pose_model: YOLO, club_model: YOLO | None, wrists: Wr
         points = np.full((joint_count, 2), np.nan)
         valid = np.zeros(joint_count, dtype=bool)
         landmark_confidence = np.zeros(5, dtype=np.float32)
+        # Derived joints (root, spine, thorax, neck, head) have no single score.
+        body_confidence = np.full(joint_count, np.nan, dtype=np.float32)
+        body_confidence[[JOINT[name] for name in DIRECT_FROM_COCO]] = 0.0
         box = np.full(4, np.nan)
 
         anchor = None
@@ -318,13 +345,18 @@ def detect_2d(video: Path, pose_model: YOLO, club_model: YOLO | None, wrists: Wr
                 if hands:
                     anchor = np.mean(hands, axis=0)
             points[:BODY_JOINTS], valid[:BODY_JOINTS] = coco_to_golfpose(xy, conf)
+            for name, coco_index in DIRECT_FROM_COCO.items():
+                body_confidence[JOINT[name]] = conf[coco_index]
             if pose_result.boxes is not None and person < len(pose_result.boxes):
                 box = pose_result.boxes.xyxy[person].cpu().numpy().astype(np.float64)
 
         previous = samples[-1] if track_club_path and samples else None
         if club_crop_model is not None:
             detection = None
-            official_club_box, _crop_details = club_crop_model.club_box(frame)
+            official_club_box, _crop_details = club_crop_model.club_box(frame,
+                result=getattr(pose_result, 'yolox_detection', None), person_box=box, anchor=anchor)
+            detector_rows.append(dict(frame_index=frame_index,
+                body=getattr(pose_result, 'detector_details', None), club=_crop_details))
         else:
             club_result = club_model.predict(
                 frame, imgsz=640, conf=CLUB_CONFIDENCE, retina_masks=True,
@@ -348,10 +380,30 @@ def detect_2d(video: Path, pose_model: YOLO, club_model: YOLO | None, wrists: Wr
                 if club_box is None and np.isfinite(box).all():
                     club_box = box
                     golfer_box_fallback = True
+            elif club_box is None and np.isfinite(box).all():
+                club_box = box
+                golfer_box_fallback = True
+                _crop_details['fallback_reason'] = 'no associated club box; refine from golfer box'
+            landmarks = None
             if club_box is not None:
                 inference = (club_pose_model.predict_coarse_to_fine if golfer_box_fallback
                              else club_pose_model.predict)
                 landmarks, landmark_confidence, _details = inference(frame, club_box)
+            # Weak or missing club: a crop around the shaft predicted from the last
+            # confident detections, anchored at the current hands.
+            weak = landmarks is None or float(np.min(landmark_confidence[:2])) < RELIABLE_CLUB_CONFIDENCE
+            prediction = shaft_predictor.predict_box(frame_index, anchor, size) if weak else None
+            if prediction is not None:
+                shaft_box, shaft_details = prediction
+                retry, retry_confidence, _retry_details = club_pose_model.predict(frame, shaft_box)
+                improved = landmarks is None or float(np.min(retry_confidence[:2])) > float(np.min(landmark_confidence[:2]))
+                shaft_details.update(kept=bool(improved), min_confidence=round(float(np.min(retry_confidence[:2])), 3))
+                predicted_crops.append(dict(frame_index=frame_index, **shaft_details))
+                if improved:
+                    landmarks, landmark_confidence = retry, retry_confidence
+                    club_box = shaft_box
+            if landmarks is not None:
+                shaft_predictor.observe(frame_index, landmarks[0], landmarks[1], float(np.min(landmark_confidence[:2])))
                 good = landmark_confidence >= club_pose_model.confidence_threshold
                 points[17:22] = landmarks
                 valid[17:22] = good
@@ -378,6 +430,9 @@ def detect_2d(video: Path, pose_model: YOLO, club_model: YOLO | None, wrists: Wr
         boxes.append(box)
         swing_wrist_y.append(wrist_height(pose_result, person))
         club_confidences.append(landmark_confidence)
+        if joint_count > BODY_JOINTS:
+            body_confidence[BODY_JOINTS:] = landmark_confidence[:joint_count - BODY_JOINTS]
+        body_confidences.append(body_confidence)
         if frame_index % 10 == 0:
             print(f"  2D frame {frame_index}, club samples {len(samples)}", flush=True)
 
@@ -399,6 +454,9 @@ def detect_2d(video: Path, pose_model: YOLO, club_model: YOLO | None, wrists: Wr
         samples=samples,
         wrist_y=np.asarray(swing_wrist_y, dtype=np.float64),
         club_confidence=np.stack(club_confidences),
+        keypoint_confidence=np.stack(body_confidences),
+        detector_details=detector_rows or None,
+        predicted_shaft_crops=predicted_crops,
     )
 
 
@@ -629,7 +687,27 @@ def draw_ball(image: np.ndarray, ball_xy: list[float] | None) -> None:
 
 
 def club_frames(swing: Swing2D) -> np.ndarray:
-    return np.flatnonzero(swing.valid[:, JOINT["hosel"]])
+    return np.flatnonzero(video_club_evidence(swing) != "none")
+
+
+def video_club_evidence(swing: Swing2D) -> np.ndarray:
+    """Apply the reference complete-club/shaft fallback to each video frame."""
+    points, valid = swing.points[:, 17:], swing.valid[:, 17:]
+    observed = valid & np.isfinite(points).all(axis=2)
+    scores = (swing.keypoint_confidence[:, 17:] if swing.keypoint_confidence is not None
+              else swing.club_confidence[:, :points.shape[1]] if swing.club_confidence is not None else None)
+    if scores is not None:
+        observed &= np.isfinite(scores)
+    complete = observed.all(axis=1)
+    length = np.linalg.norm(points[:, 1] - points[:, 0], axis=1)
+    confidence = (swing.keypoint_confidence[:, 17] if swing.keypoint_confidence is not None
+                  else swing.club_confidence[:, 0] if swing.club_confidence is not None
+                  else observed[:, 0].astype(float))
+    shaft = observed[:, 0] & np.isfinite(confidence) & (confidence >= .10)
+    evidence = np.full(swing.frames, 'none', dtype='<U14')
+    evidence[~complete & shaft] = 'shaft_fallback'
+    evidence[complete & (length >= 12)] = 'complete'
+    return evidence
 
 
 def render_video(
@@ -643,7 +721,8 @@ def render_video(
 ) -> int:
     width, height = swing.size
     panel = Panel3D(width, height, poses)
-    detected = club_frames(swing)
+    evidence = video_club_evidence(swing)
+    detected = np.flatnonzero(swing.valid[:, JOINT["hosel"]]) if swing.samples else []
     first = int(detected[0]) if len(detected) else None
     last = int(detected[-1]) if len(detected) else None
     capture = cv2.VideoCapture(str(video))
@@ -677,7 +756,10 @@ def render_video(
             if not np.isfinite(pose).all():
                 path = np.zeros((0, 3))
                 path_times = np.zeros(0)
-            right = panel.render(pose, path, path_times, show_club=first is not None and np.isfinite(pose).all())
+            right = panel.render(pose, path, path_times,
+                                 show_club=evidence[frame_index] != 'none' and np.isfinite(pose).all())
+            if evidence[frame_index] == 'shaft_fallback':
+                outlined_text(right, 'club: inferred endpoints/head', (12, right.shape[0] - 15), .5)
 
             combined = np.hstack([left, right])
             if writer is None:
@@ -795,6 +877,120 @@ def track_ball(video: Path, ball_model, swing: Swing2D, address: int | None, imp
     }
 
 
+def ball_presence(video: Path, ball_model, swing: Swing2D, frames: range, ball_xy: list[float],
+                  radius: float, drift: float) -> tuple[dict[int, bool], list[float] | None]:
+    """Whether the ball is still at rest on its spot, per frame, and that spot.
+
+    The camera may pan or zoom between address and impact, so the spot is
+    re-anchored on the first detection within `drift` of the address position
+    and then followed while the ball stays within `radius` of it.
+    """
+    if ball_model is None or ball_xy is None:
+        return {}, None
+    spot = None
+    wanted = set(frames)
+    present: dict[int, bool] = {}
+    capture = cv2.VideoCapture(str(video))
+    try:
+        for frame_index in range(max(wanted) + 1):
+            ok, frame = capture.read()
+            if not ok:
+                break
+            if frame_index not in wanted:
+                continue
+            result = ball_model.predict(frame, conf=BALL_CONFIDENCE, imgsz=BALL_PRESENCE_IMAGE_SIZE, verbose=False)[0]
+            centres = ([np.asarray(polygon, dtype=np.float64).reshape(-1, 2).mean(axis=0)
+                        for polygon in result.masks.xy if len(polygon) >= 3]
+                       if result.masks is not None else [])
+            anchor = np.asarray(ball_xy, dtype=np.float64) if spot is None else spot
+            limit = drift if spot is None else radius
+            near = [centre for centre in centres if float(np.linalg.norm(centre - anchor)) <= limit]
+            if near:
+                spot = min(near, key=lambda centre: float(np.linalg.norm(centre - anchor)))
+            present[frame_index] = bool(near)
+    finally:
+        capture.release()
+    return present, None if spot is None else [round(float(spot[0]), 2), round(float(spot[1]), 2)]
+
+
+def approach_time(distances: dict[int, tuple[float, str]], last: int, near: float) -> float | None:
+    """Fractional frame at which the detected clubhead reaches the ball.
+
+    Extrapolates the last two consecutive detected clubhead-to-ball distances
+    up to frame `last`, provided the clubhead is closing in and already within
+    `near` pixels. Impact itself is usually too blurred to detect.
+    """
+    for frame in range(last, min(distances), -1):
+        (now, kind), (before, kind_before) = distances[frame], distances[frame - 1]
+        if kind == kind_before == "detected":
+            if before > now and now <= near:
+                return frame + now / (before - now)
+            return None
+    return None
+
+
+def contact_frame(swing: Swing2D, ball_xy: list[float] | None, window: tuple[int, int], max_distance: float,
+                  tracked: np.ndarray | None = None, tracked_penalty: float = 0.0,
+                  presence: dict[int, bool] | None = None) -> tuple[int | None, str | None, dict]:
+    """Moment of impact from the ball, inside `window`.
+
+    1. Ball departure: the ball was at its spot and, from some frame on, never
+       is again. At contact the clubhead covers the ball, so the contact frame is
+       that first missing frame or the one before; the clubhead nearer the ball
+       decides between them.
+    2. Otherwise the clubhead nearest the ball (within `max_distance`).
+    The clubhead is the detected hosel, or the tracked hosel plus
+    `tracked_penalty` pixels where the club was not detected (blur at impact).
+    """
+    details: dict = {"window": list(window)}
+    if ball_xy is None:
+        return None, None, details
+    ball = np.asarray(ball_xy, dtype=np.float64)
+    hosel = JOINT["hosel"]
+    lower, upper = window
+
+    def clubhead_distance(frame: int) -> tuple[float, str]:
+        if swing.valid[frame, hosel] and np.isfinite(swing.points[frame, hosel]).all():
+            return float(np.linalg.norm(swing.points[frame, hosel] - ball)), "detected"
+        if tracked is not None and np.isfinite(tracked[frame]).all():
+            return float(np.linalg.norm(tracked[frame] - ball)) + tracked_penalty, "tracked"
+        return float("inf"), "none"
+
+    distances = {frame: clubhead_distance(frame) for frame in range(lower, upper + 1)}
+    details["clubhead_distance_px"] = {str(f): (None if not np.isfinite(d) else round(d, 1), kind)
+                                       for f, (d, kind) in distances.items()}
+    if presence:
+        checked = sorted(presence)
+        seen = False
+        departure = None
+        for frame in checked:
+            if presence[frame]:
+                seen = True
+                departure = None
+            elif seen and departure is None and frame >= lower:
+                departure = frame
+        if departure is not None and departure <= upper and all(not presence[f] for f in checked if f >= departure):
+            options = [f for f in (departure - 1, departure) if lower <= f <= upper]
+            best = min(options, key=lambda f: distances[f][0])
+            details.update(ball_departure_frame=int(departure),
+                           ball_presence={str(f): bool(v) for f, v in presence.items()})
+            if distances[best][0] <= max_distance:
+                return int(best), "ball_departure", details
+            # Blurred or misdetected club at impact: extrapolate the approach seen
+            # just before it, else the last frame with the ball at rest.
+            details["clubhead_unconfirmed"] = True
+            reach = approach_time(distances, options[0], APPROACH_NEAR * max_distance) if len(options) == 2 else None
+            if reach is not None:
+                details["clubhead_reaches_ball_at"] = round(reach, 2)
+                return int(min(departure, max(options[0], round(reach)))), "ball_departure", details
+            return int(options[0]), "ball_departure", details
+        details["ball_presence"] = {str(f): bool(v) for f, v in presence.items()}
+    frame, (distance, kind) = min(distances.items(), key=lambda item: item[1][0])
+    if np.isfinite(distance) and distance <= max_distance:
+        return int(frame), ("clubhead_at_ball" if kind == "detected" else "tracked_clubhead_at_ball"), details
+    return None, None, details
+
+
 def impact_from_ball(swing: Swing2D, ball_xy: list[float] | None, top: int | None, fallback: int | None,
                      search_window: tuple[int,int] | None = None, max_distance: float | None = None) -> int | None:
     """Impact is the detected clubhead closest to the ball after the top.
@@ -870,6 +1066,85 @@ def save_position_stills(
     return written
 
 
+class SkeletonQualityError(ValueError):
+    """The golfer's 2D skeleton is missing for too long inside the swing."""
+
+
+# Root, hips, shoulders, elbows, wrists: what the phase and position rules read.
+SKELETON_CORE = (0, 1, 4, 11, 12, 13, 14, 15, 16)
+SKELETON_CORE_REQUIRED = 6
+# Self-occlusion at the top (arms behind the head) can hide the arms for a few
+# frames; a drifted body crop loses the golfer for a second or more.
+SKELETON_MAX_GAP_SECONDS = 0.3
+SKELETON_MAX_LOST_FRACTION = 0.15
+
+
+def skeleton_lost_frames(valid: np.ndarray) -> np.ndarray:
+    """Frames where fewer than 6 of the 9 core joints, or neither wrist, were detected."""
+    core = valid[:, list(SKELETON_CORE)]
+    return (core.sum(axis=1) < SKELETON_CORE_REQUIRED) | ~(valid[:, 13] | valid[:, 16])
+
+
+def _runs(mask: np.ndarray) -> list[tuple[int, int]]:
+    runs, start = [], None
+    for index, flag in enumerate(mask):
+        if flag and start is None:
+            start = index
+        elif not flag and start is not None:
+            runs.append((start, index - 1))
+            start = None
+    if start is not None:
+        runs.append((start, len(mask) - 1))
+    return runs
+
+
+def check_skeleton(swing: Swing2D, start: int, stop: int, folder: Path, label: str) -> dict:
+    """Abort with SkeletonQualityError when the skeleton is lost inside [start, stop].
+
+    Lost frames are interpolated otherwise, and a long gap makes every later
+    position land on invented poses. The limit is a gap longer than
+    max(3 frames, 0.3 s) or more than 15% of the window. Diagnostics are written
+    to `skeleton_diagnostics.json` either way.
+    """
+    lost = skeleton_lost_frames(swing.valid)
+    start, stop = max(0, int(start)), min(swing.frames - 1, int(stop))
+    window = lost[start:stop + 1]
+    gaps = [(a + start, b + start) for a, b in _runs(window)]
+    longest = max((b - a + 1 for a, b in gaps), default=0)
+    max_gap = max(3, int(round(SKELETON_MAX_GAP_SECONDS * swing.fps)))
+    fraction = float(window.mean()) if len(window) else 0.0
+    failed = longest > max_gap or fraction > SKELETON_MAX_LOST_FRACTION
+    sources = {}
+    for row in swing.detector_details or []:
+        if row is None:
+            continue
+        frame = row.get("frame_index")
+        body = row.get("body") if isinstance(row.get("body"), dict) else row
+        if frame is not None and start <= frame <= stop and lost[frame]:
+            source = body.get("body_crop_source") or body.get("crop_source")
+            sources[str(source)] = sources.get(str(source), 0) + 1
+    report = {
+        "checked_window": [start, stop], "window_label": label,
+        "lost_frames": int(window.sum()), "lost_fraction": round(fraction, 3),
+        "lost_ranges": [[int(a), int(b)] for a, b in gaps],
+        "longest_gap_frames": int(longest), "max_gap_frames": max_gap,
+        "max_lost_fraction": SKELETON_MAX_LOST_FRACTION, "crop_sources_on_lost_frames": sources,
+        "core_joints_valid_per_frame": swing.valid[:, list(SKELETON_CORE)].sum(axis=1).tolist(),
+        "passed": not failed,
+    }
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "skeleton_diagnostics.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
+    if failed:
+        ranges = ", ".join(f"{a}-{b} ({(b - a + 1) / swing.fps:.2f} s)" for a, b in gaps[:6])
+        raise SkeletonQualityError(
+            f"Golfer skeleton lost inside the {label} (frames {start}-{stop}): {int(window.sum())} frames "
+            f"({fraction:.0%}), longest gap {longest} frames (limit {max_gap}). Lost ranges: {ranges}. "
+            f"Positions in or after these frames would be chosen from interpolated poses, so the run was aborted. "
+            f"Check the body crops on those frames ({folder / 'skeleton_diagnostics.json'}), supply --golfer-box "
+            f"around the golfer, or pass --allow-skeleton-gaps to continue anyway.")
+    return report
+
+
 def process(
     video: Path,
     pose_model: YOLO,
@@ -886,19 +1161,22 @@ def process(
     club_pose_model=None,
     track_club_path: bool = False,
     club_crop_model=None,
+    club_mask_model=None,
+    allow_skeleton_gaps: bool = False,
 ) -> None:
     print(f"Source: {video}", flush=True)
-    swing = swing_for_lifter(
-        detect_2d(video, pose_model, club_model, wrists, club_pose_model, track_club_path, club_crop_model), lifter
-    )
+    detected_2d = detect_2d(video, pose_model, club_model, wrists, club_pose_model, track_club_path, club_crop_model)
+    swing = swing_for_lifter(detected_2d, lifter)
+    folder = output_folder or OUTPUT_DIR / video.stem
     names = joint_names(swing.points.shape[1])
+    dropped_2d = joint_names(detected_2d.points.shape[1])[len(names):] if detected_2d.points.shape[1] > len(names) else []
     if reviewed_positions is not None:
         if set(reviewed_positions) != set(POSITION_NAMES):
             raise ValueError("Reviewed positions must contain P1 through P10")
         if any(not 0 <= frame < swing.frames for frame in reviewed_positions.values()):
             raise ValueError("Reviewed frame selection exceeds video bounds")
-    club = swing.points[:, JOINT["hosel"]].copy()
-    club[~swing.valid[:, JOINT["hosel"]]] = np.nan
+    from golf_workflows.swing_phases import observed_club_track
+    club, club_track_source = observed_club_track(swing.points, swing.valid)
     phase_inputs=swing.filled.copy()
     swing.filled = smooth_keypoints(swing.filled, swing.fps)
     club_landmark_confidence = (swing.club_confidence if swing.club_confidence is not None
@@ -907,10 +1185,44 @@ def process(
     if club_pose_model is None:
         for sample in swing.samples:
             club_confidence[sample.frame] = sample.confidence
+    from golf_workflows.position_selection import infer_handedness, infer_view
+    view_detection = {"source": "argument"}
+    handedness_detection = {"source": "argument"}
+    if view == "auto":
+        view, view_detection = infer_view(swing.points, swing.valid)
+    if handedness == "auto":
+        handedness, handedness_detection = infer_handedness(swing.points, swing.valid, view)
+    print(f"View: {view} ({view_detection['source']}), handedness: {handedness} ({handedness_detection['source']})",
+          flush=True)
+    club_tracking = {"applied": False, "reason": "club refinement disabled"}
+    shaft_measurements = None
+    track = None
     if club_refinement:
         from golf_workflows.club_refinement import prepare_club_inputs
         swing.filled, _ = prepare_club_inputs(swing.points, swing.filled, swing.valid, club_confidence)
-    phase_diagnostics={"method":"legacy_clubhead_or_wrist"}
+        from golf_workflows.club_measurements import shaft_angle_measurements
+        from golf_workflows.club_tracking import apply_track, track_club
+        floor = (club_landmark_confidence[:, :2].min(axis=1) if swing.club_confidence is not None
+                 else club_confidence)
+        hands = (swing.filled[:, JOINT["left_wrist"]] + swing.filled[:, JOINT["right_wrist"]]) / 2.0
+        detected_pair = swing.valid[:, JOINT["shaft"]] & swing.valid[:, JOINT["hosel"]]
+        reliable_pair = detected_pair & (floor >= RELIABLE_CLUB_CONFIDENCE)
+        lengths = np.linalg.norm(swing.points[:, JOINT["hosel"]] - swing.points[:, JOINT["shaft"]], axis=1)
+        length_px = float(np.median(lengths[reliable_pair])) if reliable_pair.any() else float("nan")
+        measurements, shaft_measurements = shaft_angle_measurements(
+            video, set(int(f) for f in np.flatnonzero(~reliable_pair)), hands, length_px, club_mask_model)
+        track = track_club(swing.points, swing.valid, floor, hands, swing.fps, measurements, RELIABLE_CLUB_CONFIDENCE)
+        if track is None:
+            club_tracking = {"applied": False, "reason": "fewer than two club detections"}
+        else:
+            swing.points, swing.valid = apply_track(swing.points, swing.valid, track)
+            swing.filled[:, JOINT["shaft"]:JOINT["hosel"] + 1] = track.points
+            phase_inputs[:, JOINT["shaft"]:JOINT["hosel"] + 1] = track.points
+            club_confidence[track.rejected] = 0.0
+            club_landmark_confidence = club_landmark_confidence.copy()
+            club_landmark_confidence[track.rejected, :2] = 0.0
+            club_tracking = {"applied": True, **track.summary}
+    phase_diagnostics={"method":"legacy_clubhead_or_wrist", "club_track_source": club_track_source}
     if reviewed_positions is not None:
         phases=SwingPhases(reviewed_positions["p1"],reviewed_positions["p4"],reviewed_positions["p7"],
                           reviewed_positions["p10"],"visual_review")
@@ -923,22 +1235,48 @@ def process(
     # restrict its search to the corroborated wrist return, not the whole clip.
     lead = lead_name(handedness)
     ball = track_ball(video,ball_model,swing,phases.address,phases.impact,lead)
+    contact = None
     if reviewed_positions is None:
-        bounds=None
         if club_refinement and phase_diagnostics.get('wrist_impact') is not None:
-            center=phase_diagnostics['wrist_impact']; radius=max(2,round(.2*swing.fps))
-            bounds=(center-radius,center+radius)
-        max_distance=.6*phase_diagnostics['body_scale_px'] if bounds is not None else None
-        corrected=impact_from_ball(swing,ball['p1_xy'],phases.top,phases.impact,bounds,max_distance)
-        if club_refinement:
-            if ball['p1_xy'] is not None and corrected is not None:
-                phases,phase_diagnostics=detect_refined_phases(swing.points,swing.valid,phase_inputs,swing.fps,club_confidence,corrected)
-        else:
+            from golf_workflows.swing_phases import impact_window
+            window = impact_window(phase_diagnostics['wrist_impact'], phases.top, swing.fps, swing.frames)
+            scale_px = phase_diagnostics['body_scale_px']
+            presence, spot = {}, ball['p1_xy']
+            if ball['p1_xy'] is not None:
+                lead_in = max(3, round(.3 * swing.fps))
+                presence, spot = ball_presence(video, ball_model, swing,
+                                               range(max(phases.top, window[0] - lead_in), window[1] + 1),
+                                               ball['p1_xy'], BALL_SPOT_RADIUS * scale_px, BALL_DRIFT * scale_px)
+                spot = spot or ball['p1_xy']
+            frame, source, contact = contact_frame(
+                swing, spot, window, .6 * scale_px,
+                tracked=None if track is None else track.points[:, 1], tracked_penalty=.1 * scale_px,
+                presence=presence)
+            contact.update(source=source, ball_spot=spot)
+            if frame is not None:
+                phases,phase_diagnostics=detect_refined_phases(swing.points,swing.valid,phase_inputs,swing.fps,
+                                                              club_confidence,frame,source)
+        elif not club_refinement:
+            corrected=impact_from_ball(swing,ball['p1_xy'],phases.top,phases.impact)
             phases.impact=corrected
             if corrected is not None:
                 # Retain uncertain tail instead of clipping before corrected contact.
                 phases.follow_through=max(phases.follow_through or 0,min(swing.frames-1,corrected+round(.5*swing.fps)))
     print(f"Phases: {phases.as_dict()}", flush=True)
+    if phase_diagnostics.get('impact_source'):
+        print(f"P7 source: {phase_diagnostics['impact_source']} (window {phase_diagnostics.get('impact_window')})", flush=True)
+    skeleton_check = {"skipped": "no swing window"}
+    if phases.address is not None:
+        window_stop = phases.follow_through if phases.follow_through is not None else swing.frames - 1
+        try:
+            skeleton_check = check_skeleton(swing, phases.address, window_stop, folder, "swing window (P1 to finish)")
+        except SkeletonQualityError as error:
+            if not allow_skeleton_gaps:
+                print(f"ERROR: {error}", flush=True)
+                raise
+            print(f"WARNING (--allow-skeleton-gaps): {error}", flush=True)
+            skeleton_check = json.loads((folder / "skeleton_diagnostics.json").read_text(encoding="utf-8"))
+            skeleton_check["overridden"] = True
     normalized, canvas = golf_canvas(swing)
     start = phases.address if phases.address is not None else 0
     stop = phases.follow_through if phases.follow_through is not None else swing.frames - 1
@@ -956,16 +1294,44 @@ def process(
             float(np.linalg.norm(swing.points[phases.impact, JOINT["hosel"]] - np.asarray(ball["p1_xy"]))),
             2,
         )
-    checkpoints = (reviewed_positions.copy() if reviewed_positions is not None
-                   else find_checkpoint_frames(poses, phases.address, phases.top, phases.impact, lead,
-                                               reserve_positions=club_refinement))
+    club_observed = None
+    position_sources = {}
+    if club_refinement:
+        landmark_floor = (club_landmark_confidence[:, :2].min(axis=1) if swing.club_confidence is not None
+                          else club_confidence)
+        club_observed = (swing.valid[:, JOINT["shaft"]] & swing.valid[:, JOINT["hosel"]]
+                         & (landmark_floor >= RELIABLE_CLUB_CONFIDENCE))
+    selection = {"method": "rule_based"}
+    if reviewed_positions is not None:
+        checkpoints = reviewed_positions.copy()
+    else:
+        rule_based = find_checkpoint_frames(poses, phases.address, phases.top, phases.impact, lead,
+                                            reserve_positions=club_refinement, club_observed=club_observed,
+                                            sources=position_sources)
+        checkpoints = rule_based
+        if club_refinement:
+            from golf_workflows.position_selection import ground_roll, level_poses, select_positions, subframe_ms
+            roll, leveling = ground_roll(swing.points, swing.valid, view)
+            image_points = None
+            if view == "face_on":
+                observed_2d = np.where(swing.valid[..., None], swing.points, np.nan).astype(np.float64)
+                padded = np.concatenate([observed_2d, np.zeros(observed_2d.shape[:2] + (1,))], axis=2)
+                image_points = level_poses(padded, roll)
+            selected, selection = select_positions(
+                level_poses(poses, roll), phases.address, phases.top, phases.impact, lead,
+                club_observed=club_observed, confidence=swing.keypoint_confidence, image_points=image_points)
+            if selection["method"] == "joint_dp":
+                checkpoints = selected
+                position_sources = selection.pop("sources")
+                selection["subframe_ms"] = subframe_ms(selection["subframe"], swing.fps)
+                selection["rule_based_positions"] = rule_based
+            selection["ground_leveling"] = leveling
     p4_face, p7_face = load_saved_face(video.stem)
     wrist_angles = {
         "p4": wrist_shaft_degrees(poses, phases.top, lead),
         "p7": wrist_shaft_degrees(poses, phases.impact, lead),
     }
 
-    folder = output_folder or OUTPUT_DIR / video.stem
     folder.mkdir(parents=True, exist_ok=True)
     saved = folder / f"{video.stem}_3d.avi"
     still = folder / f"{video.stem}_3d.jpg"
@@ -985,6 +1351,15 @@ def process(
         keypoints_3d_before_club_refinement=unrefined_poses,
         club_confidence=club_confidence,
         club_landmark_confidence=club_landmark_confidence,
+        club_evidence=video_club_evidence(swing),
+        **({"keypoints_2d_confidence": swing.keypoint_confidence}
+           if swing.keypoint_confidence is not None else {}),
+        **({"club_track_points": track.points.astype(np.float32),
+            "club_track_angle": track.theta.astype(np.float32),
+            "club_track_sigma_deg": track.sigma_deg.astype(np.float32),
+            "club_track_accepted": track.accepted, "club_track_rejected": track.rejected,
+            "club_track_swapped": track.swapped, "club_track_measurement_used": track.measurement_used}
+           if track is not None else {}),
         fps=np.float32(swing.fps),
         frame_size=np.array(swing.size),
     )
@@ -1003,14 +1378,19 @@ def process(
                 "joint_count": len(names),
                 "unmeasured_extra_club_inputs": (EXTRA_CLUB_JOINTS if len(names) == 22 and club_pose_model is None else []),
                 "extra_club_input_fill": ("hosel" if len(names) == 22 and club_pose_model is None else None),
+                "dropped_2d_landmarks": dropped_2d,
                 "pose_model": getattr(pose_model,"metadata",{}).get("pose_checkpoint",POSE_MODEL),
                 "pose_backend": getattr(pose_model,"metadata",{}),
                 "club_model": relative(MODEL_PATH) if club_model is not None else None,
                 "club_pose_backend": (getattr(club_pose_model, "metadata", None)
                                       if club_pose_model is not None else {"club_pose_backend": "segmentation"}),
-                "club_crop_backend": (getattr(club_crop_model, "metadata", None)
+                "club_crop_backend": ({"club_crop_backend": pose_model.metadata.get("club_crop_backend"),
+                                       "detector": pose_model.metadata.get("person_detector")}
+                                      if getattr(pose_model, "joint_pose", False) is True else
+                                      getattr(club_crop_model, "metadata", None)
                                       if club_crop_model is not None else {"club_crop_backend": "segmentation"}),
                 "club_path_tracking": track_club_path,
+                "detector_crops": swing.detector_details,
                 "club_path_rendering": track_club_path,
                 "club_refinement": refinement,
                 "window_blending": club_refinement,
@@ -1025,10 +1405,33 @@ def process(
                 "phases": phases.as_dict(),
                 "phase_detection": phase_diagnostics,
                 "positions": checkpoints,
+                "skeleton_check": {key: value for key, value in skeleton_check.items()
+                                   if key != "core_joints_valid_per_frame"},
+                "view_detection": view_detection,
+                "handedness_detection": handedness_detection,
+                "club_tracking": club_tracking,
+                "shaft_angle_measurements": shaft_measurements,
+                "predicted_shaft_crops": {
+                    "tried": len(swing.predicted_shaft_crops or []),
+                    "kept": sum(1 for row in swing.predicted_shaft_crops or [] if row.get("kept")),
+                    "frames": swing.predicted_shaft_crops or [],
+                },
+                "body_fusion": swing.body_fusion,
                 "checkpoint_selection": {"method": "reviewed_indices_reused" if reviewed_positions is not None else "automatic",
+                                         "selector": selection.get("method"),
+                                         "position_confidence": selection.get("confidence"),
+                                         "subframe_frames": selection.get("subframe"),
+                                         "subframe_ms": selection.get("subframe_ms"),
+                                         "rule_based_positions": selection.get("rule_based_positions"),
+                                         "ground_leveling": selection.get("ground_leveling"),
+                                         "trail_wrist_frames": selection.get("trail_wrist_frames"),
+                                         "position_sources": position_sources,
+                                         "reliable_club_confidence": RELIABLE_CLUB_CONFIDENCE if club_observed is not None else None,
+                                         "reliable_club_frames": None if club_observed is None else int(club_observed.sum()),
                                          "frame_index_base": 0, "fresh_2d_inference": True},
                 "position_stills": stills,
                 "ball": ball,
+                "impact_contact": contact,
                 "p4_face": p4_face,
                 "p7_face": p7_face,
                 "projected_wrist_deg": {
@@ -1036,6 +1439,9 @@ def process(
                 },
                 "lift_window": [int(start), int(stop)],
                 "club_detected_frames": int(len(detected)),
+                "club_evidence_policy": "complete club first; otherwise confident shaft with inferred MixSTE geometry",
+                "club_evidence_counts": {kind: int((video_club_evidence(swing) == kind).sum())
+                                         for kind in ('complete', 'shaft_fallback', 'none')},
                 "mediapipe_wrists_replaced": 0 if wrists is None else wrists.replaced,
                 "interpolated_frames": {
                     name: int((~swing.valid[:, index]).sum()) for index, name in enumerate(names)
@@ -1086,10 +1492,15 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("video", nargs="?", type=Path, help="Swing video. Defaults to a random file in user_swings.")
     parser.add_argument("--all", action="store_true", help="Process every video in user_swings.")
     parser.add_argument("--lifter", choices=("17+2", "17+5"), default="17+2")
-    parser.add_argument("--pose-backend", choices=("yolo26n-pose", "vitpose-huge"), default="yolo26n-pose")
+    parser.add_argument("--pose-backend", choices=("yolo26n-pose", "vitpose-huge", "golfpose-golfer-vitpose-huge"), default="yolo26n-pose")
     parser.add_argument("--pose-cpu-threads", type=int, default=4)
-    parser.add_argument("--club-pose-backend", choices=("segmentation", "vitpose-huge"), default="segmentation")
-    parser.add_argument("--club-crop-backend", choices=("segmentation", "official-yolox-2cls"), default="segmentation")
+    parser.add_argument("--golfer-box", type=float, nargs=4, metavar=('X1', 'Y1', 'X2', 'Y2'),
+                        help="Golfer ROI in original-frame pixels, used where the GolfPose detector misses "
+                             "(joint ViTPose, or YOLO26n with the YOLOX body crop). Overrides the automatic ROI.")
+    parser.add_argument("--no-auto-golfer-box", action="store_true",
+                        help="Do not derive a default golfer ROI from a YOLO26n pass over sampled frames.")
+    parser.add_argument("--club-pose-backend", choices=("segmentation", "vitpose-huge"), default="vitpose-huge")
+    parser.add_argument("--club-crop-backend", choices=("segmentation", "official-yolox-2cls"), default="official-yolox-2cls")
     parser.add_argument("--track-club-path", action="store_true",
                         help="Opt in to temporal club association and the rendered swing trail.")
     parser.add_argument("--positions-json", type=Path, help="Reuse reviewed P1-P10 indices while inferring new poses.")
@@ -1102,19 +1513,34 @@ def main(argv: list[str] | None = None) -> None:
         action="store_true",
         help="Fill YOLO wrists below 0.25 confidence from MediaPipe Pose.",
     )
-    parser.add_argument("--handedness", choices=("right", "left"), default="right")
-    parser.add_argument("--view", choices=("down_the_line", "face_on"), default="down_the_line")
+    parser.add_argument("--handedness", choices=("auto", "right", "left"), default="auto",
+                        help="auto: from the 2D hands (falls back to right when ambiguous).")
+    parser.add_argument("--view", choices=("auto", "down_the_line", "face_on"), default="auto",
+                        help="auto: from shoulder width and the feet line at address (falls back to down_the_line).")
+    parser.add_argument("--no-body-fusion", action="store_true",
+                        help="Joint ViTPose only: do not fill low-confidence body joints from YOLO26n.")
+    parser.add_argument("--no-club-mask", action="store_true",
+                        help="Do not use the golf-club segmentation mask as a shaft-angle measurement.")
+    parser.add_argument("--allow-skeleton-gaps", action="store_true",
+                        help="Warn instead of aborting when the golfer skeleton is lost inside the swing window.")
     args = parser.parse_args(argv)
+    joint_pose = args.pose_backend == "golfpose-golfer-vitpose-huge"
+    roi_capable = joint_pose or (args.pose_backend == "yolo26n-pose" and args.club_crop_backend == "official-yolox-2cls")
+    if args.golfer_box is not None and not roi_capable:
+        parser.error('--golfer-box applies to --pose-backend golfpose-golfer-vitpose-huge, '
+                     'or yolo26n-pose with --club-crop-backend official-yolox-2cls')
+    if joint_pose and args.mediapipe_wrists:
+        parser.error("--mediapipe-wrists applies only to the legacy COCO body backends")
     if args.run_dir and args.all:
         parser.error("--run-dir accepts a single video only")
-    if args.club_pose_backend == "vitpose-huge" and args.lifter != "17+5":
-        parser.error("--club-pose-backend vitpose-huge requires --lifter 17+5")
-    if args.club_crop_backend == "official-yolox-2cls" and args.club_pose_backend != "vitpose-huge":
+    if not joint_pose and args.club_crop_backend == "official-yolox-2cls" and args.club_pose_backend != "vitpose-huge":
         parser.error("--club-crop-backend official-yolox-2cls requires --club-pose-backend vitpose-huge")
     if args.club_marker_length_m is not None and (not args.club_refinement or not np.isfinite(args.club_marker_length_m) or args.club_marker_length_m <= 0):
         parser.error("--club-marker-length-m requires --club-refinement and a finite positive distance")
     if args.output_dir is not None:
         OUTPUT_DIR = args.output_dir.resolve()
+    elif joint_pose:
+        OUTPUT_DIR = ROOT / "runs" / ("golf_pose_3d_golfer_vitpose_" + args.lifter.replace("+", "plus"))
     elif args.pose_backend == "vitpose-huge":
         OUTPUT_DIR = ROOT / "runs" / ("golf_pose_3d_vitpose_huge_" + args.lifter.replace("+", "plus"))
     elif args.lifter == "17+5":
@@ -1122,7 +1548,7 @@ def main(argv: list[str] | None = None) -> None:
     if args.club_refinement and args.output_dir is None:
         OUTPUT_DIR = OUTPUT_DIR.with_name(OUTPUT_DIR.name + "_club_refined")
 
-    needs_segmentation = args.club_crop_backend == "segmentation" or args.club_pose_backend == "segmentation"
+    needs_segmentation = not joint_pose and (args.club_crop_backend == "segmentation" or args.club_pose_backend == "segmentation")
     if needs_segmentation and not MODEL_PATH.is_file():
         raise SystemExit(f"Trained golf-club weights not found: {MODEL_PATH}")
     if args.all:
@@ -1135,24 +1561,55 @@ def main(argv: list[str] | None = None) -> None:
     lifter = load_lifter(CHECKPOINT_22 if args.lifter == "17+5" else CHECKPOINT)
     from golf_workflows.vitpose_tracking import load_pose_backend
     pose_model = load_pose_backend(args.pose_backend, cpu_threads=args.pose_cpu_threads)
+    if args.golfer_box is not None:
+        from golf_workflows.golfer_vitpose import validate_golfer_box
+        try:
+            validate_golfer_box(args.golfer_box)
+        except ValueError as exc:
+            parser.error(str(exc))
     club_model = YOLO(str(MODEL_PATH)) if needs_segmentation else None
     from golf_workflows.club_vitpose import load_club_pose_backend
     try:
-        club_pose_model = load_club_pose_backend(args.club_pose_backend)
+        club_pose_model = pose_model if joint_pose else load_club_pose_backend(args.club_pose_backend)
     except FileNotFoundError as exc:
         parser.error(str(exc))
     from golf_workflows.official_yolox import load_club_crop_backend
     try:
-        club_crop_model = load_club_crop_backend(args.club_crop_backend)
+        club_crop_model = None if joint_pose else load_club_crop_backend(args.club_crop_backend)
     except FileNotFoundError as exc:
         parser.error(str(exc))
+    if args.pose_backend == 'yolo26n-pose' and club_crop_model is not None:
+        from golf_workflows.detector_pose import YOLOXBodyPose
+        pose_model = YOLOXBodyPose(pose_model, club_crop_model)
     ball_model = None
     if BALL_MODEL.is_file():
         ball_model = YOLOE(str(BALL_MODEL))
         ball_model.set_classes(["golf ball"])
     wrists = WristFallback() if args.mediapipe_wrists else None
+    roi_model = None
+    from golf_workflows.golfer_roi import POSE_WEIGHTS
+    if roi_capable and args.golfer_box is None and not args.no_auto_golfer_box:
+        roi_model = pose_model.pose_model if hasattr(pose_model, "pose_model") else YOLO(str(POSE_WEIGHTS))
+    if joint_pose and not args.no_body_fusion and POSE_WEIGHTS.is_file():
+        pose_model.body_fallback_model = roi_model or YOLO(str(POSE_WEIGHTS))
+        pose_model.metadata["body_fusion"] = "yolo26n-pose where ViTPose < 0.3 and YOLO26n >= 0.5"
+    club_mask_model = None
+    if args.club_refinement and not args.no_club_mask and MODEL_PATH.is_file():
+        club_mask_model = club_model or YOLO(str(MODEL_PATH))
     try:
         for video in videos:
+            if joint_pose:
+                pose_model.diagnostics_dir = args.run_dir.resolve() if args.run_dir else OUTPUT_DIR / video.stem
+            if roi_capable:
+                if args.golfer_box is not None:
+                    pose_model.set_initial_golfer_box(args.golfer_box, "manual")
+                elif roi_model is not None:
+                    from golf_workflows.golfer_roi import auto_golfer_roi
+                    roi, roi_details = auto_golfer_roi(video, roi_model)
+                    print(f"Golfer ROI (auto YOLO26n): {roi_details['roi_xyxy']}", flush=True)
+                    pose_model.set_initial_golfer_box(roi, "auto-yolo26n", roi_details)
+                else:
+                    pose_model.set_initial_golfer_box(None, details={"source": "disabled"})
             process(
                 video,
                 pose_model,
@@ -1169,6 +1626,8 @@ def main(argv: list[str] | None = None) -> None:
                 club_pose_model=club_pose_model,
                 track_club_path=args.track_club_path,
                 club_crop_model=club_crop_model,
+                club_mask_model=club_mask_model,
+                allow_skeleton_gaps=args.allow_skeleton_gaps,
             )
     finally:
         if wrists is not None:

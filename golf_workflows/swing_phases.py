@@ -20,6 +20,14 @@ MOTION_FRACTION = 0.12
 IMPACT_NEAR = 0.35
 DECAY_FRACTION = 0.35
 SUSTAIN_FRAMES = 3
+# Club frames below this landmark confidence are treated as unobserved when a
+# position depends on the club (blurred shafts typically score about 0.2).
+RELIABLE_CLUB_CONFIDENCE = 0.3
+# Fraction of the lead arm's rotation from hanging to parallel at which the
+# shaft is parallel (P2 on the way back, P6 on the way down).
+ARM_PROGRESS_AT_SHAFT_PARALLEL = 0.3
+IMPACT_BEFORE_HANDS_SECONDS = 0.1
+IMPACT_AFTER_HANDS_SECONDS = 0.3
 
 
 @dataclass
@@ -165,7 +173,97 @@ def detect_phases(
     return SwingPhases(address, top, impact, follow, signal)
 
 
-def detect_refined_phases(points, valid, filled, fps, confidence=None, impact_hint=None):
+def observed_club_track(points, valid):
+    """Use a single observed landmark consistently: hosel, then shaft."""
+    for joint, name in ((18, 'hosel'), (17, 'shaft')):
+        good = valid[:, joint] & np.isfinite(points[:, joint]).all(axis=1)
+        if good.sum() >= MIN_SAMPLES:
+            track = points[:, joint].copy()
+            track[~good] = np.nan
+            return track, name
+    return np.full((len(points), 2), np.nan), 'unavailable'
+
+
+def _club_reversal(points, reliable, wrist_top, impact, fps, scale):
+    """Top of the backswing as the frame where the shaft stops rotating back.
+
+    The hands often peak before the club finishes loading, so the 2D shaft
+    angle (grip to hosel) is searched within 0.15 s of the wrist peak. Only
+    reliable detections with a readable projected length count, and the turn
+    must be inside the window on both sides; otherwise None.
+    """
+    radius = max(2, int(round(.15 * fps)))
+    vector = points[:, 18] - points[:, 17]
+    length = np.linalg.norm(vector, axis=1)
+    usable = reliable & (length >= .4 * scale)
+    before = [f for f in range(max(0, wrist_top - 4 * radius), wrist_top + 1) if usable[f]]
+    window = [f for f in range(max(1, wrist_top - radius), min(impact - 2, wrist_top + radius) + 1) if usable[f]]
+    if len(before) < 3 or len(window) < 3:
+        return None
+    frames = sorted(set(before) | set(window))
+    theta = dict(zip(frames, np.degrees(np.unwrap(np.arctan2(vector[frames, 1], vector[frames, 0])))))
+    direction = np.sign(np.polyfit(before, [theta[f] for f in before], 1)[0])
+    if direction == 0:
+        return None
+    turn = max(window, key=lambda f: direction * theta[f])
+    earlier = [direction * theta[f] for f in window if f < turn]
+    later = [direction * theta[f] for f in window if f > turn]
+    peak = direction * theta[turn]
+    if not earlier or not later or peak - min(earlier) < 3 or peak - min(later) < 3:
+        return None
+    return int(turn)
+
+
+def _club_rest_end(club, reliable, origin, top, fps):
+    """Last reliable frame before the top with the clubhead still at its address spot.
+
+    `club` is the body-relative clubhead; the rest radius is a tenth of its
+    backswing excursion (at least 0.1 torso). Needs two reliable rest frames
+    within 0.3 s, so a single noisy detection cannot set the address. A
+    detection that jumps more than 0.6 torso per frame from the last accepted
+    clubhead is a misdetection (takeaway is slow) and is ignored.
+    """
+    if top is None or top < 3:
+        return None
+    displacement = np.linalg.norm(club[:top] - origin, axis=1)
+    observed = reliable[:top] & np.isfinite(displacement)
+    accepted = None
+    for frame in np.flatnonzero(observed):
+        if accepted is not None and np.linalg.norm(club[frame] - club[accepted]) > .6 * (frame - accepted):
+            observed[frame] = False
+        else:
+            accepted = frame
+    if not observed.any():
+        return None
+    excursion = float(np.max(displacement[observed]))
+    threshold = max(.1, .1 * excursion)
+    resting = np.flatnonzero(observed & (displacement < threshold))
+    moving = np.flatnonzero(observed & (displacement >= threshold))
+    if not len(resting) or not len(moving):
+        return None
+    candidates = resting[resting < moving[-1]]
+    if not len(candidates):
+        return None
+    last = int(candidates[-1])
+    span = max(2, int(round(.3 * fps)))
+    if np.count_nonzero((resting > last - span) & (resting <= last)) < 2:
+        return None
+    return last
+
+
+def impact_window(wrist_impact, top, fps, frames):
+    """Frames searched for contact around the hands' low point.
+
+    With forward shaft lean (lead wrist bowed, clubhead trailing the hands) the
+    hands bottom out before the clubhead reaches the ball, so the window reaches
+    further after the hands' low point (0.3 s) than before it (0.1 s).
+    """
+    lower = max(top + 1, wrist_impact - max(2, int(round(IMPACT_BEFORE_HANDS_SECONDS * fps))))
+    upper = min(frames - 1, wrist_impact + max(3, int(round(IMPACT_AFTER_HANDS_SECONDS * fps))))
+    return int(lower), int(max(lower, upper))
+
+
+def detect_refined_phases(points, valid, filled, fps, confidence=None, impact_hint=None, impact_hint_source='ball'):
     """Use refined club geometry and body-relative wrists before 3D lifting.
 
     Wrist rise/return corroborates club impact candidates. Missing club samples
@@ -179,13 +277,14 @@ def detect_refined_phases(points, valid, filled, fps, confidence=None, impact_hi
     torso = np.linalg.norm(filled[:,8]-filled[:,0],axis=1)
     body_good = valid[:,0] & valid[:,8] & (valid[:,13] | valid[:,16])
     scale = float(np.median(torso[body_good])) if body_good.any() else 0.0
+    raw_club, track_source = observed_club_track(points, valid)
     details = dict(method='refined_club_with_wrist_corroboration',
                    original_club_observations=int(valid[:,18].sum()),
+                   original_shaft_observations=int(valid[:,17].sum()), club_track_source=track_source,
                    body_observations=int(body_good.sum()),body_scale_px=scale,
                    ball_impact_hint=impact_hint,ball_impact_hint_accepted=False)
     if body_good.sum() < MIN_SAMPLES or scale < 1e-6:
-        club=points[:,18].copy(); club[~valid[:,18]]=np.nan
-        result=detect_phases(club,None,fps)
+        result=detect_phases(raw_club,None,fps)
         # Without wrist corroboration, keep uncertain post-impact frames rather
         # than treating a short club speed dip as proof the swing has ended.
         if result.impact is not None:
@@ -197,6 +296,8 @@ def detect_refined_phases(points, valid, filled, fps, confidence=None, impact_hi
     phase_valid[:,17:19] &= near_hands[:,None]
     club_filled,weights=prepare_club_inputs(points,filled,phase_valid,confidence)
     club = (club_filled[:,18]-filled[:,0])/scale
+    if track_source == 'shaft':
+        club = (filled[:,17]-filled[:,0])/scale
     hands = (wrists-filled[:,0])/scale
     hands = np.column_stack([smooth_series(hands[:,i],fps) for i in range(2)])
     height = -hands[:,1]
@@ -204,8 +305,7 @@ def detect_refined_phases(points, valid, filled, fps, confidence=None, impact_hi
     span = float(np.ptp(height))
     details['reliable_club_pairs']=int((weights>0).sum())
     if span < 0.15:
-        raw=points[:,18].copy(); raw[~valid[:,18]]=np.nan
-        result=detect_phases(raw,None,fps)
+        result=detect_phases(raw_club,None,fps)
         if result.impact is not None: result.follow_through=n-1
         details.update(fallback='insufficient_wrist_height_change',finish_reason='clip_end_uncertain')
         return result,details
@@ -223,12 +323,19 @@ def detect_refined_phases(points, valid, filled, fps, confidence=None, impact_hi
         details.update(fallback='no_corroborated_wrist_rise_and_return',finish_reason='clip_end_uncertain')
         return result,details
     _,top,wrist_impact=max(candidates)
-    # Refined club position may locate contact more precisely, but only near
-    # the corroborated wrist return and with a genuinely detected endpoint pair.
+    wrist_top=top
+    reliable=(weights>=RELIABLE_CLUB_CONFIDENCE)&np.isfinite(points[:,17:19]).all(axis=(1,2))
+    club_top=_club_reversal(points,reliable,wrist_top,wrist_impact,fps,scale)
+    if club_top is not None:
+        top=club_top
+    # Contact comes first: a ball-based hint (ball leaving its spot, or the
+    # clubhead at the ball), then the clubhead back at its address spot, and only
+    # then the hands' low point. All are limited to the window around the hands.
     impact=wrist_impact
-    radius=max(2,int(round(.12*fps)))
+    impact_source='wrist_return'
+    lower,upper=impact_window(wrist_impact,top,fps,n)
     ids=np.arange(n)
-    observed=(weights>0)&(ids>top)&(np.abs(ids-wrist_impact)<=radius)
+    observed=(weights>0)&(ids>=lower)&(ids<=upper)
     baseline_count=max(2,min(8,top//3))
     origin=np.median(club[:baseline_count],axis=0)
     if observed.any():
@@ -238,15 +345,25 @@ def detect_refined_phases(points, valid, filled, fps, confidence=None, impact_hi
         excursion=float(np.max(np.linalg.norm(club[:top+1]-origin,axis=1)))
         if distances[choice] <= max(.15,.35*excursion):
             impact=int(options[choice])
-    if impact_hint is not None and top < impact_hint < n and abs(impact_hint-wrist_impact)<=max(radius,round(.2*fps)):
+            impact_source='clubhead_return_to_address'
+    if impact_hint is not None and lower <= impact_hint <= upper:
         impact=int(impact_hint)
+        impact_source=impact_hint_source
         details['ball_impact_hint_accepted']=True
+    details.update(impact_source=impact_source,impact_window=[lower,upper])
     hand_origin=np.median(hands[:baseline_count],axis=0)
     distance=np.linalg.norm(hands-hand_origin,axis=1)
     threshold=max(.06,.1*float(distance[:top+1].max()))
     moving=(distance>=threshold)&(ids<top)
     onset=_sustain(moving,max(2,int(round(.06*fps))))
     address=max(0,(onset if onset is not None else top-1)-int(round(.1*fps)))
+    hand_address=address
+    # The clubhead resting behind the ball is a cleaner start than hand motion:
+    # the clubhead moves first and furthest. The last reliable rest frame before
+    # the top skips earlier waggles.
+    club_rest=_club_rest_end(club,reliable,origin,top,fps)
+    if club_rest is not None:
+        address=max(0,min(club_rest+1-int(round(.1*fps)),top-2))
     # Finish requires raised hands plus sustained low wrist speed. Do not use
     # instantaneous speed at impact, where vertical velocity may reverse.
     peak_speed=float(np.percentile(speed,95))
@@ -255,11 +372,26 @@ def detect_refined_phases(points, valid, filled, fps, confidence=None, impact_hi
     risen=height >= height[wrist_impact]+.5*(height[top]-height[wrist_impact])
     quiet=(speed<quiet_threshold)&risen&(ids>impact+max(2,int(round(.15*fps))))&body_good
     settled=_sustain(quiet,hold)
-    follow=n-1 if settled is None else min(n-1,settled+hold-1+int(round(.15*fps)))
+    # P10 is the held finish with the hands up by the lead ear. The first quiet
+    # moment can be the pause where the hands stop rising and wrap around the
+    # head, so the window stays open until the raised hands come back down.
+    lowered=None
+    if settled is None:
+        follow=n-1
+        finish_reason='clip_end_no_sustained_hold'
+    else:
+        lowered=_sustain(~risen[settled:],max(2,int(round(.1*fps))))
+        follow=n-1 if lowered is None else settled+lowered-1
+        finish_reason='raised_hands_lowered' if lowered is not None else 'clip_end_hands_still_raised'
     follow=max(follow,impact+1)
     follow=min(follow,n-1)
-    details.update(wrist_top=top,wrist_impact=wrist_impact,quiet_threshold_body_units_per_s=quiet_threshold,
-                   finish_hold_frames=hold,finish_reason='sustained_wrist_hold' if settled is not None else 'clip_end_no_sustained_hold')
+    details.update(wrist_top=wrist_top,club_top=club_top,top_source='club_reversal' if club_top is not None else 'wrist_peak',
+                   hand_address=hand_address,club_rest_end=club_rest,
+                   address_source='club_rest' if club_rest is not None else 'hand_motion_onset',
+                   wrist_impact=wrist_impact,quiet_threshold_body_units_per_s=quiet_threshold,
+                   finish_hold_frames=hold,finish_hold_start=settled,
+                   hands_lowered_at=None if lowered is None else int(settled+lowered),
+                   finish_reason=finish_reason)
     return SwingPhases(address,top,impact,follow,'refined_club+wrist'),details
 
 
@@ -303,11 +435,14 @@ def _first_parallel(
     return None
 
 
-def _closest_horizontal(poses: np.ndarray, start: int, end: int, joint_a: int, joint_b: int) -> int | None:
+def _closest_horizontal(poses: np.ndarray, start: int, end: int, joint_a: int, joint_b: int,
+                        allowed: np.ndarray | None = None) -> int | None:
     best = None
     best_tilt = float("inf")
     stop = min(end, len(poses) - 1)
     for frame in range(max(0, start), stop + 1):
+        if allowed is not None and not allowed[frame]:
+            continue
         if not (_finite_row(poses[frame, joint_a]) and _finite_row(poses[frame, joint_b])):
             continue
         direction = _unit(poses[frame, joint_a], poses[frame, joint_b])
@@ -318,6 +453,118 @@ def _closest_horizontal(poses: np.ndarray, start: int, end: int, joint_a: int, j
             best_tilt = tilt
             best = frame
     return best
+
+
+def _arm_crossing(
+    poses: np.ndarray,
+    start: int,
+    end: int,
+    shoulder: int,
+    wrist: int,
+    rising: bool,
+    threshold: float = 0.25,
+) -> int | None:
+    """Lead arm passing through shoulder height, in [start, end].
+
+    A tolerance test alone takes the first frame inside the band, which at
+    low frame rates can still be well below (rising) or above (falling)
+    the shoulder. Take the sign change instead, then keep whichever frame of
+    the pair is closer to horizontal. Falls back to the tolerance test when
+    the arm starts on the far side or never crosses.
+    """
+    stop = min(end, len(poses) - 1)
+    previous = None
+    for frame in range(max(0, start), stop + 1):
+        if not (_finite_row(poses[frame, shoulder]) and _finite_row(poses[frame, wrist])):
+            continue
+        direction = _unit(poses[frame, shoulder], poses[frame, wrist])
+        if direction is None:
+            continue
+        tilt = abs(float(direction[1]))
+        above = float(poses[frame, wrist, 1]) <= float(poses[frame, shoulder, 1])
+        if above == rising:
+            if previous is None:
+                break
+            return previous[0] if previous[1] < tilt else frame
+        previous = (frame, tilt)
+    return _first_parallel(poses, start - 1, end + 1, shoulder, wrist, threshold)
+
+
+def _elbow_extension(poses: np.ndarray, frame: int) -> float | None:
+    """Mean of both elbow angles in degrees; 180 is a straight arm."""
+    angles = []
+    for shoulder, elbow, wrist in ((11, 12, 13), (14, 15, 16)):
+        if not all(_finite_row(poses[frame, joint]) for joint in (shoulder, elbow, wrist)):
+            return None
+        upper = _unit(poses[frame, elbow], poses[frame, shoulder])
+        lower = _unit(poses[frame, elbow], poses[frame, wrist])
+        if upper is None or lower is None:
+            return None
+        angles.append(np.degrees(np.arccos(min(1.0, max(-1.0, float(np.dot(upper, lower)))))))
+    return float(np.mean(angles))
+
+
+def _shaft_or_arm(poses: np.ndarray, start: int, end: int, shaft: int, hosel: int, shoulder: int, wrist: int,
+                  observed: np.ndarray | None, max_tilt: float = 0.35) -> tuple[int | None, str]:
+    """Shaft closest to horizontal, using only frames with a detected club.
+
+    Without `observed` every lifted shaft counts. When no detected club in the
+    range is near horizontal (within `max_tilt`), the parallel moment fell in
+    frames where the lifted shaft is mostly inferred. The lead arm then stands
+    in: 30% of its rotation from the hanging end (P1 for P2, P7 for P6) toward
+    the parallel end (P3 or P5). On observed shafts in 005 and frames reviewed
+    in 008, the shaft is parallel at 25-30% of that rotation. Lifted wrist
+    height relative to the pelvis is not used; at address it can already be
+    level with the root.
+    """
+    if observed is None:
+        return _closest_horizontal(poses, start, end, shaft, hosel), "shaft"
+    frame = _closest_horizontal(poses, start, end, shaft, hosel, observed)
+    if frame is not None:
+        direction = _unit(poses[frame, shaft], poses[frame, hosel])
+        if direction is not None and abs(float(direction[1])) <= max_tilt:
+            return frame, "observed_shaft"
+
+    def elevation(frame: int) -> float | None:
+        if not (0 <= frame < len(poses) and _finite_row(poses[frame, shoulder]) and _finite_row(poses[frame, wrist])):
+            return None
+        direction = _unit(poses[frame, shoulder], poses[frame, wrist])
+        return None if direction is None else float(np.degrees(np.arcsin(np.clip(-direction[1], -1, 1))))
+
+    before, after = elevation(start - 1), elevation(end + 1)
+    if before is None or after is None:
+        return _closest_horizontal(poses, start, end, shaft, hosel), "shaft"
+    hanging, parallel = (before, after) if before < after else (after, before)
+    target = hanging + ARM_PROGRESS_AT_SHAFT_PARALLEL * (parallel - hanging)
+    scored = [(abs(value - target), frame) for frame in range(max(0, start), min(end, len(poses) - 1) + 1)
+              if (value := elevation(frame)) is not None]
+    return (min(scored)[1] if scored else None), "lead_arm_progress"
+
+
+def _most_extended(poses: np.ndarray, start: int, end: int, shaft: int, hosel: int, tolerance: float = 5.0,
+                   observed: np.ndarray | None = None) -> int | None:
+    """Frame in [start, end] with the straightest arms. Frames within
+    `tolerance` degrees of the best are tied; the shaft closest to
+    horizontal breaks the tie, counting only detected clubs."""
+    scored = []
+    for frame in range(max(0, start), min(end, len(poses) - 1) + 1):
+        extension = _elbow_extension(poses, frame)
+        if extension is not None:
+            scored.append((frame, extension))
+    if not scored:
+        return _closest_horizontal(poses, start, end, shaft, hosel)
+    best = max(extension for _, extension in scored)
+    tied = [frame for frame, extension in scored if extension >= best - tolerance]
+
+    def tilt(frame: int) -> float:
+        if observed is not None and not observed[frame]:
+            return float("inf")
+        if not (_finite_row(poses[frame, shaft]) and _finite_row(poses[frame, hosel])):
+            return float("inf")
+        direction = _unit(poses[frame, shaft], poses[frame, hosel])
+        return float("inf") if direction is None else abs(float(direction[1]))
+
+    return min(tied, key=lambda frame: (tilt(frame), -dict(scored)[frame]))
 
 
 def _lag_angle(poses: np.ndarray, frame: int, elbow: int, wrist: int, shaft: int, hosel: int) -> float | None:
@@ -338,11 +585,20 @@ def find_checkpoint_frames(
     impact: int | None,
     lead: str = "left",
     reserve_positions: bool = False,
+    club_observed: np.ndarray | None = None,
+    sources: dict | None = None,
 ) -> dict[str, int | None]:
     """P2 through P10 from a 3D skeleton. P1, P4, and P7 are the phases already found.
 
-    Camera y points down, so a horizontal bone has a near-zero y component.
+    Definitions follow the P classification (hackmotion.com/golf-swing-positions):
+    shaft parallel at P2/P6/P8, lead arm parallel at P3/P5/P9, hands by the lead
+    ear at P10. Camera y points down, so a horizontal bone has a near-zero y component.
+    `club_observed` (per frame) limits shaft tests to frames with a detected
+    club; `sources`, if given, receives which evidence chose P2 and P6.
     """
+    sources = {} if sources is None else sources
+    if club_observed is not None:
+        club_observed = np.asarray(club_observed, dtype=bool)
     shaft, hosel = 17, 18
     head = 10
     if lead == "left":
@@ -366,56 +622,78 @@ def find_checkpoint_frames(
     if not (0 <= address <= top <= impact < len(poses)):
         return positions
 
-    # Halfway back is the first time the lead arm becomes parallel, before the top.
-    positions["p3"] = _first_parallel(poses, address + int(reserve_positions), top, shoulder, wrist, 0.25)
+    # Halfway back is the lead arm rising through parallel, before the top.
+    positions["p3"] = _arm_crossing(poses, address + 1 + int(reserve_positions), top - 1, shoulder, wrist, rising=True)
     # Takeaway is the shaft closest to the 3D view's ground, after address and before P3.
     p3 = positions["p3"]
-    positions["p2"] = (
-        _closest_horizontal(poses, address + 1, p3 - 1, shaft, hosel) if p3 is not None else None
-    )
-    hip = 4 if lead == "left" else 1
-    hip_height = float(poses[address, hip, 1]) if _finite_row(poses[address, hip]) else None
-    p5 = None
-    for frame in range(top + 1, impact - int(reserve_positions)):
-        if not (_finite_row(poses[frame, shaft]) and _finite_row(poses[frame, hosel])):
-            continue
-        direction = _unit(poses[frame, shaft], poses[frame, hosel])
-        if direction is None or _up_component(direction) > 0.35:
-            continue
-        if hip_height is not None and _finite_row(poses[frame, wrist]):
-            if float(poses[frame, wrist, 1]) >= hip_height:
-                continue
-        p5 = frame
-        break
+    if p3 is not None:
+        positions["p2"], sources["p2"] = _shaft_or_arm(poses, address + 1, p3 - 1, shaft, hosel, shoulder, wrist,
+                                                       club_observed)
+    # Early downswing mirrors P3: the lead arm comes down through parallel. A shaft
+    # test would fire at the top, where a full backswing already has the shaft parallel.
+    p5 = _arm_crossing(poses, top + 1, impact - 1 - int(reserve_positions), shoulder, wrist, rising=False)
     positions["p5"] = p5
     # Pre-impact is the shaft closest to the 3D view's ground, after P5 and before the ball.
-    positions["p6"] = (
-        _closest_horizontal(poses, p5 + 1, impact - 1, shaft, hosel) if p5 is not None else None
-    )
+    if p5 is not None:
+        positions["p6"], sources["p6"] = _shaft_or_arm(poses, p5 + 1, impact - 1, shaft, hosel, shoulder, wrist,
+                                                       club_observed)
 
     last = len(poses) - 1
     if reserve_positions:
         finite=np.flatnonzero(np.isfinite(poses).all(axis=(1,2)))
         last=int(finite[-1]) if len(finite) else last
     # P8 needs a frame between impact and P9; P10 needs one after P9.
-    positions["p9"] = _closest_horizontal(poses, impact + 1 + int(reserve_positions), last - int(reserve_positions), shoulder, wrist)
-    p9 = positions["p9"]
-    # Release is the shaft closest to the 3D view's ground, after the ball and before P9.
-    positions["p8"] = (
-        _closest_horizontal(poses, impact + 1, p9 - 1, shaft, hosel) if p9 is not None else None
-    )
+    # P9 mirrors P3: the lead arm rising through parallel after impact. The first
+    # frame inside the tolerance band can still have the hands below the shoulder.
+    # Later frames include the finish and the club being lowered, where the arm
+    # passes parallel again.
+    p9 = _arm_crossing(poses, impact + 1 + int(reserve_positions), last - int(reserve_positions),
+                       shoulder, wrist, rising=True)
+    if p9 is None:
+        rising = [frame for frame in range(impact + 1, last + 1) if _finite_row(poses[frame, wrist])]
+        apex = min(rising, key=lambda frame: float(poses[frame, wrist, 1])) if rising else last
+        p9 = _closest_horizontal(poses, impact + 1 + int(reserve_positions),
+                                 min(apex, last - int(reserve_positions)), shoulder, wrist)
+    positions["p9"] = p9
+    heights = {frame: -float(poses[frame, wrist, 1]) for frame in range(impact, last + 1)
+               if _finite_row(poses[frame, wrist])}
+    # Release is both arms fully extended after the ball: the largest elbow angles
+    # before P9. The arms are just as straight at impact, so the hands must have
+    # started up, a quarter of the way from their impact height to P9. The shaft
+    # is often blurred here, so it only breaks near-ties.
+    p8 = None
+    if p9 is not None:
+        start = impact + 1
+        if impact in heights and p9 in heights:
+            risen = heights[impact] + 0.25 * (heights[p9] - heights[impact])
+            start = next((frame for frame in range(impact + 1, p9)
+                          if heights.get(frame, -np.inf) >= risen), start)
+        p8 = _most_extended(poses, start, p9 - 1, shaft, hosel, observed=club_observed)
+    positions["p8"] = p8
     if p9 is None:
         p9 = impact
+    # End of swing: hands up by the lead ear while they are held at their highest.
+    # Frames within 5% of that peak (relative to the rise since impact) form the
+    # finish; after them the golfer is lowering the club. A lead-side dot product
+    # is unstable here because the hands wrap around close to the head, so require
+    # raised hands.
+    finish_start, finish_end = p9 + 1, last
+    if impact in heights and any(frame > p9 for frame in heights):
+        apex = max((frame for frame in heights if frame > p9), key=heights.get)
+        floor = heights[apex] - 0.05 * (heights[apex] - heights[impact])
+        finish_start = finish_end = apex
+        while finish_start - 1 > p9 and heights.get(finish_start - 1, -np.inf) >= floor:
+            finish_start -= 1
+        while heights.get(finish_end + 1, -np.inf) >= floor:
+            finish_end += 1
     nearest = None
     nearest_distance = float("inf")
-    for frame in range(p9 + 1, last + 1):
+    for frame in range(finish_start, finish_end + 1):
         if not (_finite_row(poses[frame, wrist]) and _finite_row(poses[frame, head])):
             continue
         if not _finite_row(poses[frame, shoulder]):
             continue
-        lead_side = poses[frame, wrist] - poses[frame, head]
-        toward_lead = poses[frame, shoulder] - poses[frame, head]
-        if float(np.dot(lead_side, toward_lead)) <= 0.0:
+        if float(poses[frame, wrist, 1]) >= float(poses[frame, shoulder, 1]):
             continue
         distance = float(np.linalg.norm(poses[frame, wrist] - poses[frame, head]))
         if distance < nearest_distance:

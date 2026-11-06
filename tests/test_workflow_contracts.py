@@ -51,6 +51,27 @@ class WorkflowContractTests(unittest.TestCase):
             cv2.imwrite(str(folder/'reference_3d.jpg'),np.zeros((8,8,3),np.uint8))
         return refs
 
+    def test_frame_export_retains_22_joint_confidence_and_shaft_fallback_evidence(self):
+        from golf_workflows.golf_pose_3d import joint_names
+        folder, indices = self.video_fixture()
+        points = np.ones((35, 22, 2)) * 10
+        points[:, 18] = [80, 10]
+        valid = np.ones((35, 22), bool)
+        valid[indices[0], 18:] = False
+        points[indices[0], 18:] = np.nan
+        confidence = np.full((35, 22), .9)
+        np.savez(folder/'swing_3d.npz', keypoints_3d=np.ones((35, 22, 3)),
+            joints=np.array(joint_names(22)), keypoints_2d=points,
+            keypoints_2d_valid=valid, keypoints_2d_confidence=confidence,
+            club_landmark_confidence=confidence[:, 17:])
+        with patch('golf_workflows.standard_frames.save_still'):
+            manifest = export_identified_frames(folder)
+        with np.load(folder/'identified_frames.npz') as data:
+            np.testing.assert_array_equal(data['keypoints_2d_confidence'], confidence[indices])
+            self.assertFalse(data['keypoints_2d_valid'][0, 18:].any())
+            self.assertEqual(data['club_evidence'][0], 'shaft_fallback')
+        self.assertEqual(manifest['frames'][0]['club_evidence'], 'shaft_fallback')
+
     def test_selected_bundle_scores_supplied_references_and_retains_source_indices(self):
         folder,indices=self.video_fixture()
         refs=self.reference_fixture()

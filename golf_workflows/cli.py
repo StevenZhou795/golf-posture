@@ -32,13 +32,14 @@ def new_output(requested, default):
     return out
 
 
-def publish(stage, out):
-    RUNS.mkdir(parents=True, exist_ok=True)
-    write_json(RUNS / f'latest_{stage}.json', {'folder': str(out)})
+def publish(stage, out, runs_root=None):
+    runs_root = Path(runs_root) if runs_root is not None else RUNS
+    runs_root.mkdir(parents=True, exist_ok=True)
+    write_json(runs_root / f'latest_{stage}.json', {'folder': str(out)})
 
 
-def latest(stage):
-    pointer = RUNS / f'latest_{stage}.json'
+def latest(stage, runs_root=None):
+    pointer = (Path(runs_root) if runs_root is not None else RUNS) / f'latest_{stage}.json'
     if not pointer.is_file():
         raise ValueError(f'No completed {stage} workflow. Run that command first or supply its folder.')
     return Path(read_json(pointer)['folder'])
@@ -71,12 +72,13 @@ def validate_reference_set(folder):
 
 def references(args):
     from golf_workflows import standard_frames
+    runs_root = getattr(args, 'runs_root', RUNS)
     sheets = sorted(args.input_dir.glob('*.jpg'))
     keys = [standard_frames.position_key(path) for path in sheets]
     if len(keys) != 10 or set(keys) != set(POSITIONS):
         raise ValueError('Input must contain exactly one P1–P10 JPG sheet each')
     cached = validate_reference_set(args.from_run) if args.from_run else None
-    out = new_output(args.output_dir, RUNS / 'references')
+    out = new_output(args.output_dir, runs_root / 'references')
     if cached:
         for entry in cached.values():
             shutil.copytree(args.from_run / entry['folder'], out / entry['folder'])
@@ -84,9 +86,13 @@ def references(args):
         standard_frames.main(['--input-dir', str(args.input_dir), '--output-dir', str(out),
                               '--pose-backend', args.pose_backend, '--lifter', args.lifter,
                               '--club-pose-backend', getattr(args, 'club_pose_backend', 'vitpose-huge'),
-                              '--club-crop-backend', getattr(args, 'club_crop_backend', 'segmentation'),
+                              '--club-crop-backend', getattr(args, 'club_crop_backend', 'official-yolox-2cls'),
                               '--pose-cpu-threads', str(args.pose_cpu_threads)])
     entries = validate_reference_set(out)
+    from golf_workflows.reference_previews import create_reference_previews
+    previews = create_reference_previews(out) if cached else {
+        'body': 'reference_3d_preview.png', 'club_overlay': 'reference_3d_club_overlay_preview.png',
+        'combined': 'reference_all_preview.png'}
     model_summary = args.from_run / 'run_summary.json' if cached else out / 'run_summary.json'
     if cached and not model_summary.is_file():
         model_summary = args.from_run / 'workflow.json'
@@ -94,9 +100,9 @@ def references(args):
                     from_run=str(args.from_run.resolve()) if cached else None,
                     fresh_2d_inference=not bool(cached), positions=entries,
                     models=read_json(model_summary).get('models') if model_summary.is_file() else None,
-                    numerical_input='joints.npz:reference_3d', image_count=10)
+                    numerical_input='joints.npz:reference_3d', image_count=10, previews=previews)
     write_json(out / 'workflow.json', manifest)
-    publish('references', out)
+    publish('references', out, runs_root)
     print(f'10 reference images and coordinate sets: {out}')
 
 
@@ -125,34 +131,67 @@ def export_identified_frames(folder):
             ('keypoints_2d_filled', 'keypoints_2d_filled'),
             ('keypoints_2d_normalized', 'keypoints_2d_normalized'),
             ('club_landmark_confidence', 'club_landmark_confidence'),
+            ('keypoints_2d_confidence', 'keypoints_2d_confidence'),
+            ('club_evidence', 'club_evidence'),
         ):
             if source in data:
                 bundle[target] = data[source][indices]
+        if 'club_evidence' not in bundle and 'keypoints_2d' in bundle and 'keypoints_2d_valid' in bundle:
+            from types import SimpleNamespace
+            from golf_workflows.golf_pose_3d import video_club_evidence
+            evidence = video_club_evidence(SimpleNamespace(frames=len(indices),
+                points=bundle['keypoints_2d'], valid=bundle['keypoints_2d_valid'],
+                keypoint_confidence=bundle.get('keypoints_2d_confidence'),
+                club_confidence=bundle.get('club_landmark_confidence')))
+            bundle['club_evidence'] = evidence
     if not np.isfinite(selected).all():
         raise ValueError('One or more selected poses lack finite 3D coordinates')
     for key, pose in zip(POSITIONS, selected):
         if not (folder / f'{key.upper()}.jpg').is_file():
             raise ValueError(f'Missing selected source image: {key}')
-        save_still(pose, folder / f'{key.upper()}_3d.jpg', key.upper())
+        evidence = str(bundle['club_evidence'][POSITIONS.index(key)]) if 'club_evidence' in bundle else None
+        title = key.upper() + (' (club inferred)' if evidence == 'shaft_fallback' else '')
+        save_still(pose, folder / f'{key.upper()}_3d.jpg', title, show_club=evidence != 'none')
     np.savez_compressed(folder / 'identified_frames.npz', positions=np.array(POSITIONS),
                         source_frame_indices=np.array(indices), joints=joints, keypoints_3d=selected,
                         **bundle)
     manifest = dict(schema_version=1, workflow='video', source=summary['source'], frame_index_base=0,
                     lead_side=summary.get('lead_side'), handedness=summary.get('handedness'),
+                    view=summary.get('view'), club_tracking=summary.get('club_tracking'),
                     checkpoint=summary.get('checkpoint'), pose_model=summary.get('pose_model'),
+                    pose_backend=summary.get('pose_backend'),
                     club_refinement=summary.get('club_refinement'),
                     checkpoint_selection=summary.get('checkpoint_selection'),
                     frames=[dict(position=key, frame_index=frame, image=f'{key.upper()}.jpg',
                                  pose_image=f'{key.upper()}_3d.jpg') for key,frame in zip(POSITIONS,indices)],
                     coordinates='identified_frames.npz')
     if 'club_landmark_confidence' in bundle:
-        manifest['club_landmarks'] = ['shaft','hosel','heel','toe_down','toe_up']
+        manifest['club_landmarks'] = [str(name) for name in joints[17:]]
         manifest['club_landmark_confidence'] = 'identified_frames.npz:club_landmark_confidence'
+    if 'keypoints_2d_confidence' in bundle:
+        manifest['keypoint_confidence'] = 'identified_frames.npz:keypoints_2d_confidence'
+    if 'club_evidence' in bundle:
+        for row, evidence in zip(manifest['frames'], bundle['club_evidence']):
+            row['club_evidence'] = str(evidence)
     write_json(folder / 'identified_frames.json', manifest)
     return manifest
 
 
 def video(args):
+    runs_root = getattr(args, 'runs_root', RUNS)
+    golfer_box = getattr(args, 'golfer_box', None)
+    no_auto_box = getattr(args, 'no_auto_golfer_box', False)
+    if golfer_box is not None or no_auto_box:
+        if args.from_run:
+            raise ValueError('--golfer-box/--no-auto-golfer-box require fresh video inference, not --from-run')
+    if golfer_box is not None:
+        if not (args.pose_backend == 'golfpose-golfer-vitpose-huge'
+                or (args.pose_backend == 'yolo26n-pose'
+                    and getattr(args, 'club_crop_backend', 'official-yolox-2cls') == 'official-yolox-2cls')):
+            raise ValueError('--golfer-box applies to the joint GolfPose ViTPose backend, '
+                             'or yolo26n-pose with --club-crop-backend official-yolox-2cls')
+        from golf_workflows.golfer_vitpose import validate_golfer_box
+        golfer_box = validate_golfer_box(golfer_box)
     if args.from_run and args.video:
         raise ValueError('Supply a video or --from-run, not both')
     if not args.from_run and not args.video:
@@ -168,7 +207,7 @@ def video(args):
         if not args.video.is_file():
             raise ValueError(f'Video not found: {args.video}')
         stem = args.video.stem
-    out = new_output(args.output_dir, RUNS / 'videos' / stem)
+    out = new_output(args.output_dir, runs_root / 'videos' / stem)
     if args.from_run:
         if args.positions_json or args.club_marker_length_m is not None or args.no_club_refinement:
             raise ValueError('--from-run reuses completed results; refinement/selection overrides require a fresh video run')
@@ -189,7 +228,7 @@ def video(args):
         command = [str(args.video.resolve()), '--run-dir', str(out),
                    '--pose-backend', args.pose_backend, '--lifter', args.lifter,
                    '--club-pose-backend', getattr(args, 'club_pose_backend', 'vitpose-huge'),
-                   '--club-crop-backend', getattr(args, 'club_crop_backend', 'segmentation'),
+                   '--club-crop-backend', getattr(args, 'club_crop_backend', 'official-yolox-2cls'),
                    '--pose-cpu-threads', str(args.pose_cpu_threads),
                    '--handedness', args.handedness, '--view', args.view]
         if not args.no_club_refinement:
@@ -200,11 +239,21 @@ def video(args):
             command += ['--club-marker-length-m', str(args.club_marker_length_m)]
         if args.positions_json:
             command += ['--positions-json', str(args.positions_json.resolve())]
+        if golfer_box is not None:
+            command += ['--golfer-box', *map(str, golfer_box)]
+        if no_auto_box:
+            command.append('--no-auto-golfer-box')
+        if getattr(args, 'no_club_mask', False):
+            command.append('--no-club-mask')
+        if getattr(args, 'no_body_fusion', False):
+            command.append('--no-body-fusion')
+        if getattr(args, 'allow_skeleton_gaps', False):
+            command.append('--allow-skeleton-gaps')
         golf_pose_3d.main(command)
     manifest = export_identified_frames(out)
     manifest['from_run'] = str(args.from_run.resolve()) if args.from_run else None
     write_json(out / 'workflow.json', manifest)
-    publish('video', out)
+    publish('video', out, runs_root)
     print(f'10 identified source frames, 3D images and poses: {out}')
 
 
@@ -234,11 +283,12 @@ def load_identified_frames(folder):
 
 def score(args):
     from golf_workflows.compare_standard_frames import compare, POSTURE
-    user = (args.run or latest('video')).resolve()
-    refs = (args.references or latest('references')).resolve()
+    runs_root = getattr(args, 'runs_root', RUNS)
+    user = (args.run or latest('video', runs_root)).resolve()
+    refs = (args.references or latest('references', runs_root)).resolve()
     validate_reference_set(refs)
     selected = load_identified_frames(user)
-    out = new_output(args.output_dir, RUNS / 'scores' / user.name)
+    out = new_output(args.output_dir, runs_root / 'scores' / user.name)
     result = compare(user, standard_dir=refs, output_dir=out, selected_swing=selected)
     result.update(schema_version=1, workflow='score', video_run=str(user), references=str(refs),
                   numerical_input=str(user / 'identified_frames.npz'), criteria=list(POSTURE),
@@ -248,7 +298,7 @@ def score(args):
                           'parameters_scored': sum(len(value['parameters']) for value in result['positions'].values() if value)}
     write_json(out / 'score.json', result)
     write_json(out / 'workflow.json', {'workflow':'score','video_run':str(user),'references':str(refs),'score':'score.json'})
-    publish('score', out)
+    publish('score', out, runs_root)
     print(f'Score: {result["pose_score"]}/100; output: {out}')
 
 
@@ -262,20 +312,33 @@ def main(argv=None):
     vid.add_argument('video',type=Path,nargs='?')
     vid.add_argument('--from-run',type=Path,help='Export ten poses from an existing completed video run')
     vid.add_argument('--positions-json',type=Path,help='Optional reviewed P1–P10 selection')
+    vid.add_argument('--golfer-box',type=float,nargs=4,metavar=('X1','Y1','X2','Y2'),
+                     help='Golfer ROI used where the GolfPose detector misses; overrides the automatic YOLO26n ROI')
+    vid.add_argument('--no-auto-golfer-box',action='store_true',
+                     help='Do not derive a default golfer ROI from a YOLO26n pass over sampled frames')
     vid.add_argument('--no-club-refinement',action='store_true')
     vid.add_argument('--track-club-path',action='store_true',
                      help='Opt in to temporal club tracking and its rendered path')
     vid.add_argument('--club-marker-length-m',type=float)
-    vid.add_argument('--handedness',choices=('right','left'),default='right')
-    vid.add_argument('--view',choices=('down_the_line','face_on'),default='down_the_line')
+    vid.add_argument('--handedness',choices=('auto','right','left'),default='auto',
+                     help='auto: from the 2D hands; falls back to right when ambiguous')
+    vid.add_argument('--view',choices=('auto','down_the_line','face_on'),default='auto',
+                     help='auto: from shoulder width and the feet line; falls back to down_the_line')
+    vid.add_argument('--no-club-mask',action='store_true',
+                     help='Do not use the golf-club segmentation mask as a shaft-angle measurement')
+    vid.add_argument('--allow-skeleton-gaps',action='store_true',
+                     help='Warn instead of aborting when the golfer skeleton is lost inside the swing window')
     scoring = sub.add_parser('score',help='Score the exported ten poses against ten references')
     scoring.add_argument('run',type=Path,nargs='?',help='Video workflow folder; defaults to latest completed video')
     scoring.add_argument('--references',type=Path,help='Reference workflow folder; defaults to latest completed references')
     for command in (ref,vid):
-        command.add_argument('--pose-backend',choices=('yolo26n-pose','vitpose-huge'),default='vitpose-huge')
-        command.add_argument('--lifter',choices=('17+2','17+5'),default='17+5')
+        command.add_argument('--pose-backend',choices=('yolo26n-pose','vitpose-huge','golfpose-golfer-vitpose-huge'),default='yolo26n-pose')
+        command.add_argument('--lifter',choices=('17+2','17+5'),default='17+2')
         command.add_argument('--club-pose-backend',choices=('segmentation','vitpose-huge'),default='vitpose-huge')
-        command.add_argument('--club-crop-backend',choices=('segmentation','official-yolox-2cls'),default='segmentation')
+        command.add_argument('--club-crop-backend',
+                             choices=(('golfer-box','segmentation','official-yolox-2cls') if command is ref
+                                      else ('segmentation','official-yolox-2cls')),
+                             default='official-yolox-2cls')
         command.add_argument('--pose-cpu-threads',type=int,default=8)
     for command in (ref,vid,scoring):
         command.add_argument('--output-dir',type=Path)

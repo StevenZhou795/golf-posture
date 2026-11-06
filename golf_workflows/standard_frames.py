@@ -1,7 +1,7 @@
 """Lift the ten standard position sheets into one 3D reference pose each.
 
 Each sheet shows the same position from face-on, down-the-line, and rear.
-The face-on lift is the 3D space. The down-the-line view supplies the side axis.
+Views are aligned in face-on space; the higher-confidence body is kept intact.
 
 Usage:
     python -m golf_workflows.standard_frames
@@ -101,6 +101,8 @@ def pose_or_none(pose: np.ndarray | None) -> list[list[float]] | None:
 
 def detect_view(crop: np.ndarray, pose_model: YOLO, club_model: YOLO | None, club_pose_model=None,
                 club_crop_model=None) -> dict:
+    if getattr(pose_model, "joint_pose", False) is True:
+        return pose_model.predict_frame(crop)
     count = 22 if club_pose_model is not None else len(GOLFPOSE_JOINTS)
     points = np.full((count, 2), np.nan)
     valid = np.zeros(count, dtype=bool)
@@ -125,7 +127,14 @@ def detect_view(crop: np.ndarray, pose_model: YOLO, club_model: YOLO | None, clu
     crop_details = None
     if club_crop_model is not None:
         detection = None
-        official_club_box, crop_details = club_crop_model.club_box(crop)
+        official_club_box, crop_details = club_crop_model.club_box(crop,
+            result=getattr(pose_result, 'yolox_detection', None), person_box=box, anchor=anchor)
+    elif club_model is None:
+        # ViTPose-only club route: localize from the golfer, then refine using
+        # the checkpoint's own shaft/hosel predictions. No club detector runs.
+        detection = None
+        official_club_box = None
+        crop_details = {"club_crop_backend": "golfer-box"}
     else:
         club_result = club_model.predict(
             crop, imgsz=640, conf=CLUB_CONFIDENCE, retina_masks=True, max_det=3, verbose=False
@@ -137,13 +146,21 @@ def detect_view(crop: np.ndarray, pose_model: YOLO, club_model: YOLO | None, clu
     if club_pose_model is not None:
         club_box = official_club_box
         golfer_box_fallback = False
-        if club_crop_model is None and detection is not None:
+        if club_crop_model is None and club_model is None:
+            if np.isfinite(box).all():
+                club_box = box
+                golfer_box_fallback = True
+        elif club_crop_model is None and detection is not None:
             _seg_grip, _seg_head, _confidence, _face, club_box = detection
         elif club_crop_model is None:
             club_box = best_club_box(club_result, club_model.names, anchor, diagonal)
             if club_box is None and np.isfinite(box).all():
                 club_box = box
                 golfer_box_fallback = True
+        elif club_box is None and np.isfinite(box).all():
+            club_box = box
+            golfer_box_fallback = True
+            crop_details['fallback_reason'] = 'no associated club box; refine from golfer box'
         if club_box is not None:
             inference = (club_pose_model.predict_coarse_to_fine if golfer_box_fallback
                          else club_pose_model.predict)
@@ -305,7 +322,27 @@ def align_to_anchor(pose: np.ndarray, anchor: np.ndarray) -> tuple[np.ndarray, d
     return best_pose, best
 
 
-def fuse_views(poses: dict[str, np.ndarray | None]) -> dict:
+def body_view_score(detected: dict | None) -> float | None:
+    """Mean body confidence; invalid native joints contribute zero."""
+    if detected is None:
+        return None
+    confidence = detected.get("keypoint_confidence")
+    if confidence is None:
+        confidence = (detected.get("pose_backend_details") or {}).get("confidence")
+    if confidence is None:
+        return None
+    confidence = np.asarray(confidence, dtype=float)
+    if confidence.ndim != 1 or len(confidence) < BODY_JOINTS:
+        return None
+    scores = np.clip(np.nan_to_num(confidence[:BODY_JOINTS], nan=0, posinf=0, neginf=0), 0, 1)
+    valid = np.asarray(detected["valid"], dtype=bool)[:BODY_JOINTS]
+    if len(confidence) in (19, 22):
+        return float(np.where(valid, scores, 0).mean())
+    # Legacy COCO confidence has a different order from the mapped body.
+    return float(scores.mean() * valid.mean())
+
+
+def fuse_views(poses: dict[str, np.ndarray | None], detections: dict | None = None) -> dict:
     normalized = {name: normalize_pose(pose) for name, pose in poses.items()}
     available = {name: pose for name, pose in normalized.items() if pose is not None}
     if not available:
@@ -316,6 +353,7 @@ def fuse_views(poses: dict[str, np.ndarray | None]) -> dict:
             "kept": [],
             "reference": None,
             "side_axis": None,
+            "body_selection": {"source_view": None, "scores": {}},
         }
     anchor_name = "face_on" if "face_on" in available else next(iter(available))
     aligned = {anchor_name: available[anchor_name]}
@@ -332,77 +370,103 @@ def fuse_views(poses: dict[str, np.ndarray | None]) -> dict:
         others = [mean_cosine(pose, other) for other_name, other in aligned.items() if other_name != name]
         agreement[name] = None if not others else round(float(np.mean(others)), 4)
 
-    kept = [name for name in ("face_on", "down_the_line") if name in aligned]
-    if not kept:
-        kept = list(aligned)
-    side = None
-    reference = aligned.get("face_on")
-    if reference is not None and "down_the_line" in aligned and anchor_name == "face_on":
-        chosen = alignment["down_the_line"]
-        side = camera_side_axis(chosen["mirrored"], chosen["yaw_deg"])
-        chosen["side_axis"] = [round(float(value), 5) for value in side]
-        reference = replace_side(aligned["face_on"], aligned["down_the_line"], side)
-    elif reference is None:
-        reference = aligned.get("down_the_line")
+    eligible = [name for name in ("face_on", "down_the_line") if name in aligned]
+    scores = {name: body_view_score((detections or {}).get(name)) for name in eligible}
+    source = max(eligible, key=lambda name: scores[name] if scores[name] is not None else -1) if eligible else None
+    reference = aligned[source].copy() if source else None
     return {
         "aligned": aligned,
         "alignment": alignment,
         "agreement": agreement,
-        "kept": kept,
+        "kept": [source] if source else [],
         "reference": reference,
-        "side_axis": side,
+        "side_axis": None,
+        "body_selection": {
+            "source_view": source, "scores": scores,
+            "eligible_views": ["face_on", "down_the_line"],
+            "method": "highest mean 17-body-joint confidence; copy whole aligned pose",
+            "missing_score_fallback": "face_on first; known scores take priority",
+        },
     }
 
 
 def build_reference_club_overlay(fused: dict, detections: dict) -> tuple[np.ndarray | None, dict]:
-    """Build a render-only club overlay from one complete, reliable GolfPose view.
+    """Prefer a complete club; allow a shaft when all eligible views miss joints.
 
-    The five official channels retain their model order and their aligned MixSTE
+    The club channels (two for 17+2, five for 17+5) retain their model order and their aligned MixSTE
     coordinates.  This function never changes ``fused['reference']``.
     """
     reference = fused.get("reference")
-    if reference is None or len(reference) != 22:
-        return None, {"applied": False, "reason": "22-joint reference unavailable"}
+    if reference is None or len(reference) not in (19, 22):
+        return None, {"applied": False, "reason": "19/22-joint reference unavailable"}
+    count = len(reference)
+    club_names = joint_names(count)[BODY_JOINTS:]
     candidates = []
-    for view, detected in detections.items():
+    shaft_candidates = []
+    complete_observation_available = False
+    eligible_views = ("face_on", "down_the_line")
+    for view in eligible_views:
+        detected = detections.get(view)
+        if detected is None:
+            continue
         confidence = np.asarray(detected["club_confidence"], dtype=float)
         points = np.asarray(detected["points"], dtype=float)
         valid = np.asarray(detected["valid"], dtype=bool)
+        if len(points) != count or len(valid) != count or confidence.shape != (len(club_names),):
+            continue
+        observed = (valid[BODY_JOINTS:] & np.isfinite(points[BODY_JOINTS:]).all(axis=1)
+                    & np.isfinite(confidence))
+        complete = bool(observed.all())
+        complete_observation_available |= complete
         donor = fused.get("aligned", {}).get(view)
-        if (len(points) != 22 or len(valid) != 22 or donor is None
-                or not valid[17:22].all() or not np.isfinite(points[17:22]).all()
-                or not np.isfinite(donor[17:22]).all()):
+        if donor is None or not np.isfinite(donor[BODY_JOINTS:]).all():
             continue
-        shaft_px = float(np.linalg.norm(points[18] - points[17]))
-        if shaft_px < 12:
-            continue
+        shaft_px = float(np.linalg.norm(points[18] - points[17])) if observed[:2].all() else None
         details = detected.get("club_pose_details") or {}
         fallback_penalty = .05 if details.get("crop_fallback") else 0.0
-        score = float(np.min(confidence)) + .25 * float(np.mean(np.clip(confidence, 0, 1))) - fallback_penalty
-        candidates.append((score, view, shaft_px, confidence))
+        if complete and shaft_px >= 12:
+            score = float(np.min(confidence)) + .25 * float(np.mean(np.clip(confidence, 0, 1))) - fallback_penalty
+            candidates.append((score, view, shaft_px, confidence, observed))
+        elif not complete and observed[0] and confidence[0] >= .10:
+            score = float(confidence[0]) - fallback_penalty
+            shaft_candidates.append((score, view, shaft_px, confidence, observed))
+    shaft_fallback = not candidates and not complete_observation_available
+    if shaft_fallback:
+        candidates = shaft_candidates
     if not candidates:
         return None, {
             "applied": False,
-            "reason": "no view has all five reliable GolfPose club landmarks",
+            "reason": "no complete eligible club or confident-shaft fallback with finite aligned geometry",
+            "eligible_views": list(eligible_views),
             "numerical_reference_modified": False,
         }
-    score, view, shaft_px, confidence = max(candidates, key=lambda item: item[0])
+    score, view, shaft_px, confidence, observed = max(candidates, key=lambda item: item[0])
     donor = fused["aligned"][view]
     overlay = reference.copy()
-    overlay[17:22] = donor[17:22]
-    direction_2d = detections[view]["points"][18] - detections[view]["points"][17]
-    direction_2d /= max(float(np.linalg.norm(direction_2d)), 1e-8)
+    overlay[BODY_JOINTS:] = donor[BODY_JOINTS:]
+    direction_2d = None
+    if shaft_px is not None:
+        direction_2d = detections[view]["points"][18] - detections[view]["points"][17]
+        direction_2d /= max(float(np.linalg.norm(direction_2d)), 1e-8)
     return overlay, {
         "applied": True,
-        "method": "direct_aligned_22_keypoint_view_render_only",
+        "method": f"direct_aligned_{count}_keypoint_view_render_only",
         "source_view": view,
+        "eligible_views": list(eligible_views),
+        "selection_rule": ("all eligible views incomplete; highest shaft confidence - crop-fallback penalty"
+                           if shaft_fallback else f"all {len(club_names)} club landmarks valid; highest min-confidence + 0.25 mean-confidence - crop-fallback penalty"),
+        "shaft_only_fallback": bool(shaft_fallback),
+        "observed_club_landmarks": [name for name, good in zip(club_names, observed) if good],
+        "inferred_club_landmarks": [name for name, good in zip(club_names, observed) if not good],
         "source_score": round(float(score), 4),
-        "source_confidence": [round(float(value), 5) for value in confidence],
-        "source_shaft_length_px": round(float(shaft_px), 2),
-        "source_shaft_direction_2d": [round(float(value), 5) for value in direction_2d],
-        "landmark_order": ["shaft", "hosel", "heel", "toe_down", "toe_up"],
+        "source_confidence": [round(float(value), 5) if np.isfinite(value) else None for value in confidence],
+        "source_shaft_length_px": round(float(shaft_px), 2) if shaft_px is not None else None,
+        "source_shaft_direction_2d": ([round(float(value), 5) for value in direction_2d]
+                                      if direction_2d is not None else None),
+        "landmark_order": club_names,
         "numerical_reference_modified": False,
-        "caveat": "Visualization overlay only; not used as a numerical reference or scoring input",
+        "caveat": ("Visualization only; missing club landmarks use the selected view's inferred MixSTE geometry; not used for scoring"
+                   if shaft_fallback else "Visualization overlay only; not used as a numerical reference or scoring input"),
     }
 
 
@@ -432,12 +496,18 @@ def process_sheet(path: Path, pose_model: YOLO, club_model: YOLO, lifter, club_p
     print(f"{path.name}", flush=True)
     for view, crop in zip(VIEWS, panels):
         detected = detect_view(crop, pose_model, club_model, club_pose_model, club_crop_model)
+        if len(detected["points"]) > len(names):
+            detected["club_confidence"] = np.asarray(detected["club_confidence"])[:len(names) - BODY_JOINTS]
+            if "keypoint_confidence" in detected:
+                detected["keypoint_confidence"] = np.asarray(detected["keypoint_confidence"])[:len(names)]
         detected["points"], detected["valid"] = pad_keypoints(detected["points"], detected["valid"], len(names))
         filled = fill_gaps(detected["points"][None], detected["valid"][None])[0]
         inputs[f"{view}_2d"] = detected["points"]
         inputs[f"{view}_2d_valid"] = detected["valid"]
         inputs[f"{view}_2d_filled"] = filled
         inputs[f"{view}_club_confidence"] = detected["club_confidence"]
+        if "keypoint_confidence" in detected:
+            inputs[f"{view}_2d_confidence"] = detected["keypoint_confidence"]
         detections[view] = detected
         cv2.imwrite(str(folder / f"{view}_labeled.jpg"), draw_labeled(crop, detected, view))
         pose = lift_still(lifter, detected, (crop.shape[1], crop.shape[0]))
@@ -457,12 +527,13 @@ def process_sheet(path: Path, pose_model: YOLO, club_model: YOLO, lifter, club_p
         }
         print(f"  {view}: pose {'yes' if pose is not None else 'no'}", flush=True)
 
-    fused = fuse_views(camera_poses)
+    fused = fuse_views(camera_poses, detections)
     club_overlay_pose, club_overlay = build_reference_club_overlay(fused, detections)
     save_still(fused["reference"], folder / "reference_3d.jpg", "reference (body)", show_club=False)
     club_overlay_path = folder / "reference_3d_club_overlay.jpg"
     if club_overlay_pose is not None:
-        save_still(club_overlay_pose, club_overlay_path, "reference (club overlay)")
+        title = "reference (club; inferred points)" if club_overlay.get("shaft_only_fallback") else "reference (club overlay)"
+        save_still(club_overlay_pose, club_overlay_path, title)
     else:
         club_overlay_path.unlink(missing_ok=True)
     for view, record in views.items():
@@ -479,13 +550,18 @@ def process_sheet(path: Path, pose_model: YOLO, club_model: YOLO, lifter, club_p
                    "club": str(MODEL_PATH.relative_to(ROOT)) if club_model is not None else None,
                    "club_pose_backend": (getattr(club_pose_model, "metadata", None)
                                          if club_pose_model is not None else {"club_pose_backend": "segmentation"}),
-                   "club_crop_backend": (getattr(club_crop_model, "metadata", None)
-                                         if club_crop_model is not None else {"club_crop_backend": "segmentation"}),
+                   "club_crop_backend": ({"club_crop_backend": pose_model.metadata.get("club_crop_backend"),
+                                          "detector": pose_model.metadata.get("person_detector")}
+                                         if getattr(pose_model, "joint_pose", False) is True else
+                                         getattr(club_crop_model, "metadata", None)
+                                         if club_crop_model is not None else {
+                                             "club_crop_backend": "segmentation" if club_model is not None else "golfer-box"}),
                    "lifter": str(lifter.checkpoint_path.relative_to(ROOT))},
         "experimental": len(names) == 22,
         "unmeasured_extra_club_inputs": EXTRA_CLUB_JOINTS if len(names) == 22 and club_pose_model is None else [],
         "views": views,
         "reference_kept": fused["kept"],
+        "reference_body_selection": fused["body_selection"],
         "side_axis": None if fused["side_axis"] is None else [round(float(value), 5) for value in fused["side_axis"]],
         "reference_3d": pose_or_none(fused["reference"]),
         "reference_club_overlay": club_overlay,
@@ -528,15 +604,34 @@ def rebuild_references() -> None:
         stored.close()
         count = len(arrays["joints"])
         poses = {view: _finite_pose(arrays[f"{view}_3d"]) for view in VIEWS}
-        fused = fuse_views(poses)
-        save_still(fused["reference"], folder / "reference_3d.jpg", "reference")
         summary = json.loads(json_path.read_text(encoding="utf-8"))
+        detections = {
+            view: {
+                "points": arrays[f"{view}_2d"],
+                "valid": arrays[f"{view}_2d_valid"],
+                "keypoint_confidence": arrays.get(f"{view}_2d_confidence"),
+                "pose_backend_details": record.get("pose_backend_details"),
+                "club_confidence": np.asarray(record.get("club_landmark_confidence", [0] * (count - BODY_JOINTS))),
+                "club_pose_details": record.get("club_pose_details"),
+            } for view, record in summary["views"].items()
+        }
+        fused = fuse_views(poses, detections)
+        overlay, overlay_metadata = build_reference_club_overlay(fused, detections)
+        save_still(fused["reference"], folder / "reference_3d.jpg", "reference (body)", show_club=False)
+        overlay_path = folder / "reference_3d_club_overlay.jpg"
+        if overlay is not None:
+            title = "reference (club; inferred points)" if overlay_metadata.get("shaft_only_fallback") else "reference (club overlay)"
+            save_still(overlay, overlay_path, title)
+        else:
+            overlay_path.unlink(missing_ok=True)
         for view, record in summary["views"].items():
             record["aligned_3d"] = pose_or_none(fused["aligned"].get(view))
             record["alignment"] = fused["alignment"].get(view)
             record["agreement"] = fused["agreement"].get(view)
             record["kept"] = view in fused["kept"]
         summary["reference_kept"] = fused["kept"]
+        summary["reference_body_selection"] = fused["body_selection"]
+        summary["reference_club_overlay"] = overlay_metadata
         summary["side_axis"] = (
             None if fused["side_axis"] is None else [round(float(value), 5) for value in fused["side_axis"]]
         )
@@ -545,27 +640,15 @@ def rebuild_references() -> None:
         arrays["reference_3d"] = (
             fused["reference"] if fused["reference"] is not None else np.full((count, 3), np.nan)
         )
+        arrays["reference_3d_club_overlay"] = overlay if overlay is not None else np.full((count, 3), np.nan)
         for view in VIEWS:
             aligned = fused["aligned"].get(view)
             arrays[f"{view}_aligned"] = aligned if aligned is not None else np.full((count, 3), np.nan)
         np.savez(npz_path, **arrays)
-        face = fused["aligned"].get("face_on")
-        donor = fused["aligned"].get("down_the_line")
-        reference = fused["reference"]
-        side = fused["side_axis"]
-        if face is not None and donor is not None and reference is not None and side is not None:
-            kept = reference - np.outer((reference - face) @ side, side)
-            copied = float(np.max(np.abs((reference - donor) @ side)))
-            picture = float(np.max(np.abs(kept - face)))
-            print(
-                f"{folder.name}: yaw {fused['alignment']['down_the_line']['yaw_deg']} "
-                f"mirror {fused['alignment']['down_the_line']['mirrored']} "
-                f"side {[round(float(value), 3) for value in side]} "
-                f"picture_err {picture:.2e} side_err {copied:.2e}",
-                flush=True,
-            )
-        else:
-            print(f"{folder.name}: reference without a side axis", flush=True)
+        print(f"{folder.name}: body source {fused['body_selection']['source_view']}; "
+              f"scores {fused['body_selection']['scores']}", flush=True)
+    from golf_workflows.reference_previews import create_reference_previews
+    create_reference_previews(OUTPUT_DIR)
     print(f"Saved: {OUTPUT_DIR}", flush=True)
 
 
@@ -575,19 +658,24 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--input-dir", type=Path, default=INPUT_DIR)
     parser.add_argument("--output-dir", type=Path)
     parser.add_argument("--lifter", choices=("17+2", "17+5"), default="17+2")
-    parser.add_argument("--pose-backend", choices=("yolo26n-pose", "vitpose-huge"), default="yolo26n-pose")
+    parser.add_argument("--pose-backend", choices=("yolo26n-pose", "vitpose-huge", "golfpose-golfer-vitpose-huge"), default="yolo26n-pose")
     parser.add_argument("--pose-cpu-threads", type=int, default=4)
-    parser.add_argument("--club-pose-backend", choices=("segmentation", "vitpose-huge"), default="segmentation")
-    parser.add_argument("--club-crop-backend", choices=("segmentation", "official-yolox-2cls"), default="segmentation")
+    parser.add_argument("--club-pose-backend", choices=("segmentation", "vitpose-huge"), default="vitpose-huge",
+                        help="Club-only backend for legacy body models; ignored by joint golfer ViTPose")
+    parser.add_argument("--club-crop-backend", choices=("golfer-box", "segmentation", "official-yolox-2cls"),
+                        default="official-yolox-2cls")
     parser.add_argument("--rebuild", action="store_true")
     args = parser.parse_args(argv)
-    if args.club_pose_backend == "vitpose-huge" and args.lifter != "17+5":
-        parser.error("--club-pose-backend vitpose-huge requires --lifter 17+5")
-    if args.club_crop_backend == "official-yolox-2cls" and args.club_pose_backend != "vitpose-huge":
+    joint_pose = args.pose_backend == "golfpose-golfer-vitpose-huge"
+    if not joint_pose and args.club_crop_backend == "official-yolox-2cls" and args.club_pose_backend != "vitpose-huge":
         parser.error("--club-crop-backend official-yolox-2cls requires --club-pose-backend vitpose-huge")
+    if not joint_pose and args.club_crop_backend == "golfer-box" and args.club_pose_backend != "vitpose-huge":
+        parser.error("--club-crop-backend golfer-box requires --club-pose-backend vitpose-huge")
     INPUT_DIR = args.input_dir.resolve()
     if args.output_dir is not None:
         OUTPUT_DIR = args.output_dir.resolve()
+    elif joint_pose:
+        OUTPUT_DIR = ROOT / "runs" / ("standard_frames_golfer_vitpose_" + args.lifter.replace("+", "plus"))
     elif args.pose_backend == "vitpose-huge":
         OUTPUT_DIR = ROOT / "runs" / ("standard_frames_vitpose_huge_" + args.lifter.replace("+", "plus"))
     elif args.lifter == "17+5":
@@ -598,7 +686,7 @@ def main(argv: list[str] | None = None) -> None:
     sheets = sorted(INPUT_DIR.glob("*.jpg"), key=sheet_order)
     if not sheets:
         raise SystemExit(f"No sheets in {INPUT_DIR}")
-    needs_segmentation = args.club_crop_backend == "segmentation" or args.club_pose_backend == "segmentation"
+    needs_segmentation = not joint_pose and (args.club_crop_backend == "segmentation" or args.club_pose_backend == "segmentation")
     if needs_segmentation and not MODEL_PATH.is_file():
         raise SystemExit(f"Trained golf-club weights not found: {MODEL_PATH}")
     from golf_workflows.vitpose_tracking import load_pose_backend
@@ -606,14 +694,18 @@ def main(argv: list[str] | None = None) -> None:
     club_model = YOLO(str(MODEL_PATH)) if needs_segmentation else None
     from golf_workflows.club_vitpose import load_club_pose_backend
     try:
-        club_pose_model = load_club_pose_backend(args.club_pose_backend)
+        club_pose_model = pose_model if joint_pose else load_club_pose_backend(args.club_pose_backend)
     except FileNotFoundError as exc:
         parser.error(str(exc))
     from golf_workflows.official_yolox import load_club_crop_backend
     try:
-        club_crop_model = load_club_crop_backend(args.club_crop_backend)
+        club_crop_model = (None if joint_pose or args.club_crop_backend == "golfer-box"
+                           else load_club_crop_backend(args.club_crop_backend))
     except FileNotFoundError as exc:
         parser.error(str(exc))
+    if args.pose_backend == 'yolo26n-pose' and club_crop_model is not None:
+        from golf_workflows.detector_pose import YOLOXBodyPose
+        pose_model = YOLOXBodyPose(pose_model, club_crop_model)
     lifter = load_lifter(CHECKPOINT_22 if args.lifter == "17+5" else CHECKPOINT)
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     reports = [process_sheet(path, pose_model, club_model, lifter, club_pose_model, club_crop_model)
@@ -632,13 +724,12 @@ def main(argv: list[str] | None = None) -> None:
         "extra_club_input_fill": ("hosel" if args.lifter == "17+5" and club_pose_model is None else None),
     }
     if club_pose_model is not None:
-        confidence = np.asarray(
-            [view["club_landmark_confidence"] for item in reports for view in item["views"].values()]
-        )
-        report["club_landmarks"] = ["shaft", "hosel", "heel", "toe_down", "toe_up"]
-        report["club_landmark_valid_views"] = (
-            confidence >= club_pose_model.confidence_threshold
-        ).sum(axis=0).tolist()
+        report["club_landmarks"] = reports[0]["joints"][BODY_JOINTS:]
+        report["club_landmark_valid_views"] = [
+            sum(view["joints_2d"].get(joint) is not None
+                for item in reports for view in item["views"].values())
+            for joint in report["club_landmarks"]
+        ]
     if club_crop_model is not None:
         crop_records = [view.get("club_crop_details") for item in reports for view in item["views"].values()]
         report["club_crop_detected_views"] = sum(
@@ -646,6 +737,8 @@ def main(argv: list[str] | None = None) -> None:
         )
         report["club_crop_total_views"] = len(crop_records)
     (OUTPUT_DIR / "run_summary.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
+    from golf_workflows.reference_previews import create_reference_previews
+    create_reference_previews(OUTPUT_DIR)
     print(f"Saved: {OUTPUT_DIR}", flush=True)
 
 

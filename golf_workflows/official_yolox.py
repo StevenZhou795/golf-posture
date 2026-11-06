@@ -1,8 +1,8 @@
-"""Native inference for GolfPose's released two-class YOLOX-s detector.
+"""Native inference for GolfPose's released one- and two-class YOLOX-s detectors.
 
 The checkpoint was trained with MMDetection, but this adapter uses only PyTorch,
-OpenCV and torchvision NMS so it also works with mmcv-lite on Windows.  Class 0
-is ``person`` and class 1 is ``club`` in the official configuration.
+OpenCV and torchvision NMS on Windows. Two-class labels are ``person`` and
+``club``; the one-class checkpoint labels its single target ``golfer``.
 """
 
 from __future__ import annotations
@@ -27,6 +27,7 @@ CHECKPOINT_CANDIDATES = (
     ROOT / "golfpose_detector_2cls_yolox_s.pth",
 )
 CLASSES = ("person", "club")
+GOLFER_CHECKPOINT = ROOT / "golfpose_checkpoints" / "golfpose_detector_1cls_yolox_s.pth"
 INPUT_SIZE = 640
 STRIDES = (8, 16, 32)
 
@@ -133,13 +134,13 @@ class YOLOXPAFPN(nn.Module):
 
 
 class YOLOXHead(nn.Module):
-    def __init__(self):
+    def __init__(self, num_classes=2):
         super().__init__()
         def tower():
             return nn.Sequential(ConvBNAct(128, 128, 3, padding=1), ConvBNAct(128, 128, 3, padding=1))
         self.multi_level_cls_convs = nn.ModuleList([tower() for _ in STRIDES])
         self.multi_level_reg_convs = nn.ModuleList([tower() for _ in STRIDES])
-        self.multi_level_conv_cls = nn.ModuleList([nn.Conv2d(128, 2, 1) for _ in STRIDES])
+        self.multi_level_conv_cls = nn.ModuleList([nn.Conv2d(128, num_classes, 1) for _ in STRIDES])
         self.multi_level_conv_reg = nn.ModuleList([nn.Conv2d(128, 4, 1) for _ in STRIDES])
         self.multi_level_conv_obj = nn.ModuleList([nn.Conv2d(128, 1, 1) for _ in STRIDES])
 
@@ -155,17 +156,17 @@ class YOLOXHead(nn.Module):
 
 
 class GolfPoseYOLOX(nn.Module):
-    def __init__(self):
+    def __init__(self, num_classes=2):
         super().__init__()
         self.backbone = CSPDarknet()
         self.neck = YOLOXPAFPN()
-        self.bbox_head = YOLOXHead()
+        self.bbox_head = YOLOXHead(num_classes)
 
     def forward(self, x):
         return self.bbox_head(self.neck(self.backbone(x)))
 
 
-def _load_weights(path: Path) -> GolfPoseYOLOX:
+def _load_weights(path: Path, num_classes=2) -> GolfPoseYOLOX:
     allowed = [builtins.getattr, np.ndarray, np.dtype,
                (multiarray._reconstruct, "numpy.core.multiarray._reconstruct"),
                (multiarray.scalar, "numpy.core.multiarray.scalar")]
@@ -173,7 +174,12 @@ def _load_weights(path: Path) -> GolfPoseYOLOX:
     allowed.append((_HistoryBuffer, "mmengine.logging.history_buffer.HistoryBuffer"))
     with torch.serialization.safe_globals(allowed):
         data = torch.load(path, map_location="cpu", weights_only=True, mmap=zipfile.is_zipfile(path))
-    model = GolfPoseYOLOX()
+    classes = data.get("meta", {}).get("dataset_meta", {}).get("classes")
+    expected = ("golfer",) if num_classes == 1 else ("person", "club")
+    actual = (classes,) if isinstance(classes, str) else tuple(classes or ())
+    if classes is not None and actual != expected:
+        raise ValueError(f"Unexpected detector classes in {path}: {classes}")
+    model = GolfPoseYOLOX(num_classes)
     model.load_state_dict(data["state_dict"], strict=True)
     return model.eval()
 
@@ -198,7 +204,8 @@ def _decode(outputs, score_threshold: float, iou_threshold: float, scale: float)
         center = pred[:, :2] * stride + prior
         size = pred[:, 2:].exp() * stride
         decoded = torch.cat((center - size / 2, center + size / 2), dim=1)
-        class_scores, class_labels = cls_score.sigmoid().permute(0, 2, 3, 1).reshape(-1, 2).max(dim=1)
+        num_classes = cls_score.shape[1]
+        class_scores, class_labels = cls_score.sigmoid().permute(0, 2, 3, 1).reshape(-1, num_classes).max(dim=1)
         combined = class_scores * objectness.sigmoid().reshape(-1)
         keep = combined >= score_threshold
         boxes.append(decoded[keep])
@@ -210,7 +217,7 @@ def _decode(outputs, score_threshold: float, iou_threshold: float, scale: float)
     scores = torch.cat(scores)
     labels = torch.cat(labels)
     kept = []
-    for label in range(len(CLASSES)):
+    for label in labels.unique().tolist():
         indexes = torch.where(labels == label)[0]
         if len(indexes):
             kept.append(indexes[nms(boxes[indexes], scores[indexes], iou_threshold)])
@@ -237,6 +244,7 @@ class OfficialClubDetector:
             "input_size": [INPUT_SIZE, INPUT_SIZE],
             "score_threshold": score_threshold,
             "nms_iou_threshold": 0.65,
+            "strict_parameter_load": True,
         }
 
     @torch.inference_mode()
@@ -251,19 +259,73 @@ class OfficialClubDetector:
         return {"boxes": boxes, "scores": scores, "labels": labels,
                 "inference_seconds": round(perf_counter() - started, 3)}
 
-    def club_box(self, frame: np.ndarray) -> tuple[np.ndarray | None, dict]:
-        result = self.predict(frame)
+    def club_box(self, frame: np.ndarray, result=None, person_box=None, anchor=None) -> tuple[np.ndarray | None, dict]:
+        result = self.predict(frame) if result is None else result
         indexes = np.where(result["labels"] == 1)[0]
+        candidate_count = len(indexes)
+        if person_box is not None and np.isfinite(person_box).all() and len(indexes):
+            candidates = result["boxes"][indexes]
+            height = max(float(person_box[3]-person_box[1]), 1.)
+            gap = np.maximum(0, np.maximum(person_box[:2]-candidates[:, 2:], candidates[:, :2]-person_box[2:]))
+            associated = np.linalg.norm(gap, axis=1) <= .75*height
+            if anchor is not None and np.isfinite(anchor).all():
+                hand_gap = np.maximum(0, np.maximum(candidates[:, :2]-anchor, anchor-candidates[:, 2:]))
+                associated &= np.linalg.norm(hand_gap, axis=1) <= .35*height
+            indexes = indexes[associated]
         chosen = int(indexes[np.argmax(result["scores"][indexes])]) if len(indexes) else None
         box = None if chosen is None else result["boxes"][chosen].astype(np.float64)
         details = {
             "detector": self.metadata,
-            "club_candidates": int(len(indexes)),
+            "club_candidates": int(candidate_count),
+            "associated_club_candidates": int(len(indexes)),
             "selected_club_score": None if chosen is None else round(float(result["scores"][chosen]), 6),
             "selected_club_bbox_xyxy": None if box is None else box.tolist(),
             "inference_seconds": result["inference_seconds"],
         }
         return box, details
+
+
+def select_box(result, label=0, minimum_score=.25, previous=None):
+    """Highest-confidence finite box, retaining an overlapping golfer across frames."""
+    boxes = np.asarray(result["boxes"], dtype=float).reshape(-1, 4)
+    scores = np.asarray(result["scores"], dtype=float)
+    indexes = np.flatnonzero((np.asarray(result["labels"]) == label) & np.isfinite(scores)
+        & (scores >= minimum_score) & np.isfinite(boxes).all(axis=1)
+        & (boxes[:, 2] > boxes[:, 0]) & (boxes[:, 3] > boxes[:, 1]))
+    if not len(indexes):
+        return None, None
+    if previous is not None and np.isfinite(previous).all():
+        candidates = boxes[indexes]
+        wh = np.maximum(0, np.minimum(candidates[:, 2:], previous[2:])
+                        - np.maximum(candidates[:, :2], previous[:2]))
+        intersection = wh.prod(axis=1)
+        union = (candidates[:, 2:] - candidates[:, :2]).prod(axis=1) + np.prod(previous[2:] - previous[:2]) - intersection
+        overlaps = intersection / np.maximum(union, 1e-6)
+        matching = indexes[overlaps >= .1]
+        if len(matching):
+            indexes = matching
+    chosen = int(indexes[np.argmax(scores[indexes])])
+    return boxes[chosen].copy(), float(scores[chosen])
+
+
+class OfficialGolferDetector(OfficialClubDetector):
+    """One-class golfer detector used to crop the joint 22-landmark pose input."""
+
+    def __init__(self, checkpoint=GOLFER_CHECKPOINT, score_threshold=.25):
+        self.checkpoint = Path(checkpoint)
+        self.score_threshold = score_threshold
+        self.model = _load_weights(self.checkpoint, num_classes=1)
+        self.metadata = dict(detector_backend="official-yolox-1cls",
+            checkpoint=str(self.checkpoint.relative_to(ROOT)), classes=["golfer"],
+            input_size=[INPUT_SIZE, INPUT_SIZE], score_threshold=score_threshold,
+            nms_iou_threshold=.65, strict_parameter_load=True)
+
+    def golfer_box(self, frame, previous=None):
+        result = self.predict(frame)
+        box, score = select_box(result, minimum_score=self.score_threshold, previous=previous)
+        return box, dict(detector=self.metadata, selected_golfer_bbox_xyxy=None if box is None else box.tolist(),
+            selected_golfer_score=score, candidates=len(result["boxes"]),
+            inference_seconds=result["inference_seconds"])
 
 
 def load_club_crop_backend(name: str):

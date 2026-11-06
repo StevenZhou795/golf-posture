@@ -18,7 +18,7 @@ from third_party.golfpose.vitpose_udp import get_heatmap_maximum, refine_keypoin
 
 ROOT = Path(__file__).resolve().parents[1]
 CHECKPOINT = ROOT / "golfpose_checkpoints/td-hm_ViTPose-huge_8xb64-210e_coco-256x192-e32adcd4_20230314.pth"
-BACKENDS = ("yolo26n-pose", "vitpose-huge")
+BACKENDS = ("yolo26n-pose", "vitpose-huge", "golfpose-golfer-vitpose-huge")
 COCO_FLIP = [0, 2, 1, 4, 3, 6, 5, 8, 7, 10, 9, 12, 11, 14, 13, 16, 15]
 
 
@@ -228,6 +228,12 @@ class ViTPoseTracking:
 
 
 def load_pose_backend(backend="yolo26n-pose", cpu_threads=4):
+    if cpu_threads < 1:
+        raise ValueError("cpu_threads must be positive")
+    torch.set_num_threads(cpu_threads)
+    if backend == "golfpose-golfer-vitpose-huge":
+        from golf_workflows.golfer_vitpose import GolferViTPose
+        return GolferViTPose(cpu_threads=cpu_threads)
     from ultralytics import YOLO
     detector = YOLO(str(ROOT/"yolo26n-pose.pt"))
     if backend == "vitpose-huge":

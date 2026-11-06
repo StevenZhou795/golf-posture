@@ -1,14 +1,24 @@
 __pycache__/
 *.py[cod]
 .venv/
+.tmp/
 venv/
 .env
 .env.*
 
-# GolfPose checkpoints are larger than GitHub's 100 MB file limit.
-/golfpose_17+5_39.2_32.3_62.8.bin
-golfpose_checkpoints/*.bin
-golfpose_checkpoints/*.pth
+# Workflow outputs (videos, stills, npz/json summaries, training runs).
+/runs/
+/outputs/
 
-# Ultralytics downloads this text encoder beside the project. It is over 100 MB.
+# Model weights and checkpoints (often over GitHub's 100 MB limit).
+*.pt
+*.pth
+*.bin
+*.onnx
+*.task
+*.ts
+/golfpose_checkpoints/
+/models/
+
+# Ultralytics may download this text encoder beside the project.
 mobileclip2_b.ts

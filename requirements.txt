@@ -1,0 +1,14 @@
+# Install torch==2.6.0 and torchvision==0.21.0 from the PyTorch CPU index first.
+# See WORKFLOW.md for the complete Windows setup commands.
+torch==2.6.0
+torchvision==0.21.0
+numpy==2.1.1
+scipy==1.14.1
+opencv-python==4.11.0.86
+matplotlib==3.11.2
+ultralytics==8.4.173
+# Text tokenizer required by Ultralytics YOLOE optional video ball timing.
+clip @ git+https://github.com/ultralytics/CLIP.git@7ffa84b3bfa40c42ecc1c77147a855e69cb2dd40
+timm==0.9.16
+einops==0.8.2
+local-attention==1.9.0
