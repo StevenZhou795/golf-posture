@@ -1,14 +1,15 @@
 __pycache__/
 *.py[cod]
 .venv/
+.venv_blazepose/
 .tmp/
 venv/
 .env
 .env.*
 
-# Workflow outputs (videos, stills, npz/json summaries, training runs).
+# Workflow outputs (root and nested workflow directories).
 /runs/
-/outputs/
+outputs/
 
 # Model weights and checkpoints (often over GitHub's 100 MB limit).
 *.pt

@@ -1,0 +1,7 @@
+# BlazePose GHUM workflow; install into its own environment (see README.md).
+# mediapipe brings opencv-contrib-python, which conflicts with the opencv-python
+# pinned in the project-level requirements.txt.
+mediapipe==1.2.2
+numpy==2.5.4
+scipy==1.18.1
+matplotlib==3.11.2

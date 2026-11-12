@@ -74,7 +74,7 @@ class YOLOXBodyPose:
     def predict_frame(self, frame, previous=None, **kwargs):
         from ultralytics.engine.results import Results
         detection = self.detector.predict(frame)
-        box, score = select_box(detection, minimum_score=.25, previous=previous)
+        box, score = select_box(detection, minimum_score=.25, previous=previous, require_overlap=True)
         height, width = frame.shape[:2]
         bounds = np.array([0, 0, width, height], dtype=int)
         crop_source = 'full-frame-fallback'
@@ -135,8 +135,9 @@ class YOLOXBodyPose:
             chosen = int(areas.argmax())
             result.vitpose_details = dict(confidence=keypoints[chosen, :, 2].tolist(),
                 detector_crop=result.detector_details)
-        if crop_source.startswith('recovered-'):
-            # Steer the next YOLOX selection back to the golfer, not the drifted box.
+        if usable and crop_source not in ('yolox-person', 'full-frame-fallback'):
+            # Steer the next YOLOX selection back to the golfer, not the drifted
+            # or stale box.
             return result, self.last_body_box.copy()
         return result, box
 
@@ -148,7 +149,9 @@ class YOLOXBodyPose:
             capture = cv2.VideoCapture(str(Path(source)))
             fps = float(capture.get(cv2.CAP_PROP_FPS))
             self.predictor.dataset.fps = fps if np.isfinite(fps) and fps > 0 else 30.0
-            previous = None
+            # Start from the golfer ROI: the highest-scoring person on the first
+            # frame can be a bystander (009: guard 0.950, golfer 0.939).
+            previous = None if self.initial_golfer_box is None else self.initial_golfer_box.copy()
             try:
                 while True:
                     ok, frame = capture.read()

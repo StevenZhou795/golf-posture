@@ -32,6 +32,15 @@ class RefinedPhasesTests(unittest.TestCase):
         self.assertTrue(48 <= phases.impact <= 56)
         self.assertFalse(valid[:, 18].any())
 
+    def test_clip_starting_at_the_top_is_flagged(self):
+        # 009: recording starts at the top, so the hands only fall, then rise to the finish.
+        points,valid=swing_fixture()
+        points,valid=points[38:],valid[38:]
+        _,details=detect_refined_phases(points,valid,points,30)
+        self.assertEqual(details['clip_starts_after_top']['highest_hands_frame'],0)
+        _,details=detect_refined_phases(*swing_fixture()[:2],swing_fixture()[0],30)
+        self.assertNotIn('clip_starts_after_top',details)
+
     def test_postimpact_selection_reserves_a_frame_for_release_and_finish(self):
         poses=np.zeros((40,19,3))
         poses[:,11]=[1,0,0]
@@ -213,18 +222,49 @@ class RefinedPhasesTests(unittest.TestCase):
         self.assertEqual((frame,source),(55,'ball_departure'))
         self.assertTrue(details['clubhead_unconfirmed'])
 
-    def test_blurred_impact_uses_clubhead_approach(self):
-        # w01: clubhead 306, 204, 92 px from the ball, then undetectable as the ball leaves.
+    def test_contact_between_frames_is_reported(self):
+        # w03: clubhead 212 px short of the ball on the last at-rest frame, gone past it on the next.
         points,valid=swing_fixture()
         points[:,18]=[1000,0]
-        points[53,18]=[306,0]; points[54,18]=[204,0]; points[55,18]=[92,0]; points[56,18]=[0,230]
+        points[55,18]=[212,0]; points[56,18]=[118,0]
+        valid[54,18]=False
         swing=SimpleNamespace(points=points,valid=valid,frames=len(points))
         presence={f:f<56 for f in range(46,62)}
-        frame,source,details=contact_frame(swing,[0,0],(49,61),81,presence=presence)
-        self.assertEqual((frame,source),(56,'ball_departure'))
-        self.assertAlmostEqual(details['clubhead_reaches_ball_at'],55.82,places=2)
-        points[54,18]=[600,0]
-        self.assertEqual(contact_frame(swing,[0,0],(49,61),81,presence=presence)[0],55)
+        frame,source,details=contact_frame(swing,[0,0],(49,61),82,presence=presence)
+        self.assertEqual((frame,source),(55,'ball_departure'))
+        self.assertEqual(details['contact_between'],[55,56])
+        self.assertFalse(details['contact_captured'])
+        points[56,18]=[40,0]
+        details=contact_frame(swing,[0,0],(49,61),82,presence=presence)[2]
+        self.assertTrue(details['contact_captured'])
+
+    def test_clubhead_motion_measures_both_contact_frames(self):
+        # 008: clubhead short of the ball while it is at rest, then a streak over the ball spot.
+        # w03: on the ball-gone frame the clubhead has already left the ground band.
+        import tempfile
+        from pathlib import Path
+        import cv2
+        from golf_workflows.golf_pose_3d import clubhead_motion
+        scale,spot=100,(320,240)
+
+        def frame(clubhead_x=None,ball=True):
+            image=np.full((480,640,3),90,np.uint8)
+            cv2.rectangle(image,(40,300),(120,330),(200,200,200),-1)  # a foot, unchanged from the top
+            if ball: cv2.circle(image,spot,6,(255,255,255),-1)
+            if clubhead_x is not None: cv2.rectangle(image,(clubhead_x-20,230),(clubhead_x+20,250),(10,10,10),-1)
+            return image
+
+        with tempfile.TemporaryDirectory() as folder:
+            for name,frames,expected in (('008',[frame(),frame(240),frame(345,ball=False)],{'1':0.6,'2':0.05}),
+                                         ('w03',[frame(),frame(240),frame(ball=False)],{'1':0.6,'2':None})):
+                path=Path(folder)/f'{name}.avi'
+                writer=cv2.VideoWriter(str(path),cv2.VideoWriter_fourcc(*'MJPG'),30,(640,480))
+                for image in frames: writer.write(image)
+                writer.release()
+                motion=clubhead_motion(path,[1,2],0,list(spot),scale)
+                for key,value in expected.items():
+                    if value is None: self.assertIsNone(motion[key],name)
+                    else: self.assertLess(abs(motion[key]-value),0.1,name)
 
     def test_blurred_impact_uses_clubhead_approach(self):
         # w01: clubhead 306, 204, 92 px from the ball, then undetectable as the ball leaves.

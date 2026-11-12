@@ -2,7 +2,7 @@ import unittest
 
 import numpy as np
 
-from golf_workflows.official_yolox import OfficialClubDetector, _prepare
+from golf_workflows.official_yolox import OfficialClubDetector, _prepare, select_box
 
 
 class OfficialYOLOXTests(unittest.TestCase):
@@ -30,6 +30,17 @@ class OfficialYOLOXTests(unittest.TestCase):
         np.testing.assert_array_equal(box, [11, 21, 31, 41])
         self.assertEqual(details["club_candidates"], 2)
         self.assertEqual(details["selected_club_score"], .8)
+
+    def test_golfer_roi_beats_higher_scoring_bystander(self):
+        # 009 frame 0: a guard at the left edge outscores the golfer.
+        result = {"boxes": np.array([[0, 381, 177, 899], [285, 323, 568, 915]], dtype=float),
+                  "scores": np.array([.950, .939]), "labels": np.array([0, 0])}
+        roi = np.array([159.4, 48.0, 704.7, 1005.6])
+        np.testing.assert_array_equal(select_box(result)[0], [0, 381, 177, 899])
+        np.testing.assert_array_equal(select_box(result, previous=roi)[0], [285, 323, 568, 915])
+        guard_only = {"boxes": result["boxes"][:1], "scores": result["scores"][:1], "labels": result["labels"][:1]}
+        self.assertIsNotNone(select_box(guard_only, previous=roi)[0])
+        self.assertIsNone(select_box(guard_only, previous=roi, require_overlap=True)[0])
 
 
 if __name__ == "__main__":

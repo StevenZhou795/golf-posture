@@ -188,6 +188,18 @@ BALL_DRIFT = 0.5
 BALL_PRESENCE_IMAGE_SIZE = 1280
 # Clubhead approach is extrapolated only from within this multiple of the contact distance.
 APPROACH_NEAR = 2.0
+# Half-width of the P7_contact.jpg crop around the ball, in torso lengths.
+CONTACT_CROP_TORSOS = 2.5
+# Clubhead from frame differencing when contact falls between two frames: pixels
+# that changed (grey levels) against both the top frame and the other frame,
+# within this many torso lengths above/below the ball and CONTACT_CROP_TORSOS
+# across; blobs smaller than CLUBHEAD_MIN_AREA torso lengths squared are noise.
+CLUBHEAD_BAND_TORSOS = 0.35
+CLUBHEAD_MOTION_LEVEL = 25
+CLUBHEAD_MIN_AREA = 0.012
+# On the ball-gone frame a clubhead this near the ball (torso lengths) is still at
+# contact (008, 010); farther, it has swung on (w03: 0.75) and the at-rest frame is kept.
+CLUBHEAD_AT_BALL = 0.5
 BALL_AREA_FRACTION = 0.02
 POSITION_NAMES = {
     "p1": "address",
@@ -718,6 +730,7 @@ def render_video(
     still: Path,
     phases,
     ball_xy: list[float] | None = None,
+    frame_overlay=None,
 ) -> int:
     width, height = swing.size
     panel = Panel3D(width, height, poses)
@@ -741,6 +754,8 @@ def render_video(
             left = render_swing_plane(frame, so_far, frame_index, phases)
             draw_skeleton_2d(left, swing.points[frame_index], swing.valid[frame_index])
             draw_ball(left, ball_xy)
+            if frame_overlay is not None:
+                frame_overlay(left, frame_index)
 
             if first is not None and frame_index >= first and np.isfinite(poses[frame_index]).all():
                 stop_frame = min(frame_index, last)
@@ -812,8 +827,15 @@ def load_saved_face(stem: str) -> tuple[dict | None, dict | None]:
     return data.get("p4_face"), data.get("p7_face")
 
 
-def track_ball(video: Path, ball_model, swing: Swing2D, address: int | None, impact: int | None, lead: str) -> dict:
+def track_ball(video: Path, ball_model, swing: Swing2D, address: int | None, impact: int | None, lead: str,
+               ball_position=None) -> dict:
     empty = {"p1_xy": None, "p1_frame": None, "p7_clubhead_distance_px": None}
+    if ball_position is not None:
+        xy = np.asarray(ball_position, dtype=float)
+        if xy.shape != (2,) or not np.isfinite(xy).all() or np.any(xy < 0) or np.any(xy >= swing.size):
+            raise ValueError('Ball position must be inside the original video frame')
+        return dict(empty, p1_xy=xy.tolist(), source='manual_placement',
+                    note='Location only; ball presence/departure still requires image evidence.')
     if ball_model is None or address is None:
         return empty
     wanted = set(range(max(0, address - 8), min(swing.frames, address + 6)))
@@ -973,7 +995,9 @@ def contact_frame(swing: Swing2D, ball_xy: list[float] | None, window: tuple[int
             options = [f for f in (departure - 1, departure) if lower <= f <= upper]
             best = min(options, key=lambda f: distances[f][0])
             details.update(ball_departure_frame=int(departure),
-                           ball_presence={str(f): bool(v) for f, v in presence.items()})
+                           ball_presence={str(f): bool(v) for f, v in presence.items()},
+                           contact_between=[int(departure - 1), int(departure)],
+                           contact_captured=bool(distances[best][0] <= max_distance))
             if distances[best][0] <= max_distance:
                 return int(best), "ball_departure", details
             # Blurred or misdetected club at impact: extrapolate the approach seen
@@ -989,6 +1013,102 @@ def contact_frame(swing: Swing2D, ball_xy: list[float] | None, window: tuple[int
     if np.isfinite(distance) and distance <= max_distance:
         return int(frame), ("clubhead_at_ball" if kind == "detected" else "tracked_clubhead_at_ball"), details
     return None, None, details
+
+
+def clubhead_motion(video: Path, between: list[int], reference: int, spot: list[float],
+                    scale_px: float) -> dict[str, float | None]:
+    """Nearest moving blob to the ball spot on the two contact frames, in torso lengths.
+
+    The club detector often fails right at impact (008: the hosel lands 450-500 px
+    from the ball), but the blurred clubhead still shows as pixels that differ
+    from the top frame (club up, ball at rest) and from the other frame. Feet and
+    shadows change between the top and impact but not between consecutive frames,
+    so they drop out. The ball spot itself is masked: the ball vanishing is not
+    the clubhead. None means no clubhead-sized blob near the ground.
+    """
+    wanted = {reference, *between}
+    grey = {}
+    capture = cv2.VideoCapture(str(video))
+    try:
+        for frame_index in range(max(wanted) + 1):
+            ok, frame = capture.read()
+            if not ok:
+                break
+            if frame_index in wanted:
+                grey[frame_index] = cv2.GaussianBlur(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY), (5, 5), 0)
+    finally:
+        capture.release()
+    if len(grey) < len(wanted):
+        return {}
+    before, after = between
+    x, y = float(spot[0]), float(spot[1])
+    height, width = grey[before].shape
+    x0, x1 = int(max(0, x - CONTACT_CROP_TORSOS * scale_px)), int(min(width, x + CONTACT_CROP_TORSOS * scale_px))
+    y0, y1 = int(max(0, y - CLUBHEAD_BAND_TORSOS * scale_px)), int(min(height, y + CLUBHEAD_BAND_TORSOS * scale_px))
+    grow = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * max(1, round(.03 * scale_px)) + 1,) * 2)
+    result: dict[str, float | None] = {}
+    for frame_index, other in ((before, after), (after, before)):
+        change = np.minimum(cv2.absdiff(grey[frame_index], grey[reference]),
+                            cv2.absdiff(grey[frame_index], grey[other]))
+        mask = np.zeros((height, width), np.uint8)
+        mask[y0:y1, x0:x1] = change[y0:y1, x0:x1] > CLUBHEAD_MOTION_LEVEL
+        cv2.circle(mask, (int(round(x)), int(round(y))), int(round(BALL_SPOT_RADIUS * scale_px)), 0, -1)
+        mask = cv2.dilate(mask, grow)
+        count, labels, stats, _ = cv2.connectedComponentsWithStats(mask)
+        nearest = None
+        for label in range(1, count):
+            if stats[label, cv2.CC_STAT_AREA] < CLUBHEAD_MIN_AREA * scale_px ** 2:
+                continue
+            ys, xs = np.nonzero(labels == label)
+            distance = float(np.min(np.hypot(xs - x, ys - y))) / scale_px
+            nearest = distance if nearest is None else min(nearest, distance)
+        result[str(frame_index)] = None if nearest is None else round(nearest, 3)
+    return result
+
+
+def save_contact_bracket(video: Path, between: list[int], spot: list[float], scale_px: float,
+                         path: Path, chosen: int | None = None) -> dict:
+    """Side-by-side crop of the last ball-at-rest frame and the first ball-gone frame.
+
+    Also measures the real time between them from the container timestamps:
+    phone and screen recordings are often variable frame rate, so the nominal
+    fps understates the gap when frames were dropped right at impact.
+    """
+    before, after = between
+    capture = cv2.VideoCapture(str(video))
+    times, crops = [], {}
+    half = int(round(CONTACT_CROP_TORSOS * scale_px))
+    try:
+        for frame_index in range(after + 1):
+            ok, frame = capture.read()
+            if not ok:
+                break
+            times.append(float(capture.get(cv2.CAP_PROP_POS_MSEC)))
+            if frame_index in (before, after):
+                x, y = int(round(spot[0])), int(round(spot[1]))
+                top, left = max(0, y - half), max(0, x - half)
+                crop = frame[top:y + half, left:x + half].copy()
+                cv2.circle(crop, (x - left, y - top), max(6, int(round(BALL_SPOT_RADIUS * scale_px))), (0, 255, 255), 2)
+                label = "ball at rest" if frame_index == before else "ball gone"
+                outlined_text(crop, f"{frame_index} {label}{'  = P7' if frame_index == chosen else ''}",
+                              (8, 28), 0.7)
+                crops[frame_index] = crop
+    finally:
+        capture.release()
+    report: dict = {"frames": [int(before), int(after)]}
+    if len(times) > after and after >= 1:
+        steps = np.diff(times)
+        steps = steps[steps > 0]
+        if steps.size:
+            nominal = float(np.median(steps))
+            interval = times[after] - times[before]
+            report.update(interval_ms=round(interval, 1), nominal_interval_ms=round(nominal, 1),
+                          dropped_frames=max(0, int(round(interval / nominal)) - 1))
+    if len(crops) == 2:
+        height = min(crop.shape[0] for crop in crops.values())
+        cv2.imwrite(str(path), np.hstack([crops[before][:height], crops[after][:height]]))
+        report["image"] = path.name
+    return report
 
 
 def impact_from_ball(swing: Swing2D, ball_xy: list[float] | None, top: int | None, fallback: int | None,
@@ -1030,6 +1150,7 @@ def save_position_stills(
     folder: Path,
     phases,
     ball_xy: list[float] | None,
+    frame_overlay=None,
 ) -> list[str]:
     wanted: dict[int, list[str]] = {}
     for key, frame in positions.items():
@@ -1058,6 +1179,8 @@ def save_position_stills(
                 labeled = image.copy()
                 outlined_text(labeled, f"{key.upper()} {POSITION_NAMES[key]}", (16, labeled.shape[0] - 24), 0.8)
                 draw_ball(labeled, ball_xy)
+                if frame_overlay is not None:
+                    frame_overlay(labeled, frame_index)
                 path = folder / f"{key.upper()}.jpg"
                 cv2.imwrite(str(path), labeled)
                 written.append(path.name)
@@ -1070,6 +1193,10 @@ class SkeletonQualityError(ValueError):
     """The golfer's 2D skeleton is missing for too long inside the swing."""
 
 
+class ClipCoverageError(ValueError):
+    """The video does not contain the whole swing (e.g. it starts at the top)."""
+
+
 # Root, hips, shoulders, elbows, wrists: what the phase and position rules read.
 SKELETON_CORE = (0, 1, 4, 11, 12, 13, 14, 15, 16)
 SKELETON_CORE_REQUIRED = 6
@@ -1077,12 +1204,69 @@ SKELETON_CORE_REQUIRED = 6
 # frames; a drifted body crop loses the golfer for a second or more.
 SKELETON_MAX_GAP_SECONDS = 0.3
 SKELETON_MAX_LOST_FRACTION = 0.15
+# Person-detector score that counts as someone in frame (the detector's own minimum).
+# A golfer in a finish pose can score as low as ~0.4.
+GOLFER_PRESENT_SCORE = 0.25
+# End cards still produce occasional low-score detections; tolerate this fraction.
+TRAILING_BLIP_FRACTION = 0.1
 
 
 def skeleton_lost_frames(valid: np.ndarray) -> np.ndarray:
     """Frames where fewer than 6 of the 9 core joints, or neither wrist, were detected."""
     core = valid[:, list(SKELETON_CORE)]
     return (core.sum(axis=1) < SKELETON_CORE_REQUIRED) | ~(valid[:, 13] | valid[:, 16])
+
+
+def golfer_detection_scores(swing: Swing2D) -> np.ndarray | None:
+    """Per-frame score of the selected YOLOX person/golfer box; 0 where none was found."""
+    rows = swing.detector_details
+    if not rows or len(rows) != swing.frames:
+        return None
+    scores = np.zeros(swing.frames)
+    for index, row in enumerate(rows):
+        if not isinstance(row, dict):
+            continue
+        body = row.get("body") if isinstance(row.get("body"), dict) else row
+        score = body.get("selected_person_score", body.get("selected_golfer_score"))
+        if score is not None:
+            scores[index] = float(score)
+    return scores
+
+
+def trailing_absence(swing: Swing2D) -> int | None:
+    """First frame of a trailing segment with no golfer, e.g. an outro card.
+
+    The person detector must stay below GOLFER_PRESENT_SCORE from that frame to
+    the end of the clip, for longer than the skeleton gap limit. The pose model
+    still returns partial skeletons on such frames, so the skeleton alone
+    cannot tell an end card from a lost golfer.
+    """
+    scores = golfer_detection_scores(swing)
+    if scores is None:
+        return None
+    present = scores >= GOLFER_PRESENT_SCORE
+    if not present.any():
+        return None
+    max_gap = max(3, int(round(SKELETON_MAX_GAP_SECONDS * swing.fps)))
+    suffix = np.cumsum(present[::-1])[::-1] / np.arange(swing.frames, 0, -1)
+    for start in range(1, swing.frames - max_gap):
+        if present[start - 1] and not present[start] and suffix[start] <= TRAILING_BLIP_FRACTION:
+            return start
+    return None
+
+
+def trim_swing(swing: Swing2D, stop: int) -> Swing2D:
+    """The first `stop` frames of `swing`."""
+    keep = slice(0, stop)
+    return replace(
+        swing, frames=stop, points=swing.points[keep], valid=swing.valid[keep], filled=swing.filled[keep],
+        boxes=swing.boxes[keep], wrist_y=swing.wrist_y[keep],
+        samples=[sample for sample in swing.samples if sample.frame < stop],
+        club_confidence=None if swing.club_confidence is None else swing.club_confidence[keep],
+        keypoint_confidence=None if swing.keypoint_confidence is None else swing.keypoint_confidence[keep],
+        detector_details=None if swing.detector_details is None else swing.detector_details[:stop],
+        predicted_shaft_crops=None if swing.predicted_shaft_crops is None else [
+            crop for crop in swing.predicted_shaft_crops if crop.get("frame_index", 0) < stop])
 
 
 def _runs(mask: np.ndarray) -> list[tuple[int, int]]:
@@ -1163,10 +1347,20 @@ def process(
     club_crop_model=None,
     club_mask_model=None,
     allow_skeleton_gaps: bool = False,
+    ball_position=None,
+    club_angle_measurements=None,
+    frame_overlay=None,
 ) -> None:
     print(f"Source: {video}", flush=True)
     detected_2d = detect_2d(video, pose_model, club_model, wrists, club_pose_model, track_club_path, club_crop_model)
     swing = swing_for_lifter(detected_2d, lifter)
+    clip_trim = {"applied": False, "decoded_frames": swing.frames}
+    stop = trailing_absence(swing)
+    if stop is not None:
+        print(f"No golfer detected from frame {stop} to the end ({swing.frames - stop} frames, e.g. an outro); "
+              f"using frames 0-{stop - 1}.", flush=True)
+        clip_trim.update(applied=True, used_frames=[0, stop - 1], min_golfer_score=GOLFER_PRESENT_SCORE)
+        swing = trim_swing(swing, stop)
     folder = output_folder or OUTPUT_DIR / video.stem
     names = joint_names(swing.points.shape[1])
     dropped_2d = joint_names(detected_2d.points.shape[1])[len(names):] if detected_2d.points.shape[1] > len(names) else []
@@ -1209,8 +1403,11 @@ def process(
         reliable_pair = detected_pair & (floor >= RELIABLE_CLUB_CONFIDENCE)
         lengths = np.linalg.norm(swing.points[:, JOINT["hosel"]] - swing.points[:, JOINT["shaft"]], axis=1)
         length_px = float(np.median(lengths[reliable_pair])) if reliable_pair.any() else float("nan")
-        measurements, shaft_measurements = shaft_angle_measurements(
-            video, set(int(f) for f in np.flatnonzero(~reliable_pair)), hands, length_px, club_mask_model)
+        if club_angle_measurements is None:
+            measurements, shaft_measurements = shaft_angle_measurements(
+                video, set(int(f) for f in np.flatnonzero(~reliable_pair)), hands, length_px, club_mask_model)
+        else:
+            measurements, shaft_measurements = club_angle_measurements
         track = track_club(swing.points, swing.valid, floor, hands, swing.fps, measurements, RELIABLE_CLUB_CONFIDENCE)
         if track is None:
             club_tracking = {"applied": False, "reason": "fewer than two club detections"}
@@ -1234,7 +1431,7 @@ def process(
     # Ball correction must precede window selection and lifting. Refined phases
     # restrict its search to the corroborated wrist return, not the whole clip.
     lead = lead_name(handedness)
-    ball = track_ball(video,ball_model,swing,phases.address,phases.impact,lead)
+    ball = track_ball(video,ball_model,swing,phases.address,phases.impact,lead,ball_position=ball_position)
     contact = None
     if reviewed_positions is None:
         if club_refinement and phase_diagnostics.get('wrist_impact') is not None:
@@ -1253,6 +1450,31 @@ def process(
                 tracked=None if track is None else track.points[:, 1], tracked_penalty=.1 * scale_px,
                 presence=presence)
             contact.update(source=source, ball_spot=spot)
+            if (contact.get("clubhead_unconfirmed") and "clubhead_reaches_ball_at" not in contact
+                    and spot is not None and phases.top is not None):
+                # Neither the detected club nor its approach places the clubhead:
+                # prefer the ball-gone frame while the moving clubhead is still at the ball.
+                motion = clubhead_motion(video, contact["contact_between"], phases.top, spot, scale_px)
+                contact["clubhead_motion_torso"] = motion
+                after = contact["contact_between"][1]
+                near_after = motion.get(str(after))
+                if near_after is not None and near_after <= CLUBHEAD_AT_BALL:
+                    frame = after
+                    contact["clubhead_motion_choice"] = after
+            if contact.get("contact_between") and spot is not None:
+                folder.mkdir(parents=True, exist_ok=True)
+                bracket = save_contact_bracket(video, contact["contact_between"], spot, scale_px,
+                                               folder / "P7_contact.jpg", chosen=frame)
+                contact["bracket"] = bracket
+                if not contact["contact_captured"]:
+                    before, after = contact["contact_between"]
+                    gap = bracket.get("interval_ms")
+                    dropped = bracket.get("dropped_frames", 0)
+                    print(f"WARNING: contact falls between frames {before} (ball at rest) and {after} "
+                          f"(ball gone){'' if gap is None else f', {gap:.0f} ms apart'}"
+                          f"{f', {dropped} dropped frame(s)' if dropped else ''}; the clubhead is on the ball "
+                          f"in neither. The video does not contain the contact instant; P7 shows frame "
+                          f"{frame}. See P7_contact.jpg.", flush=True)
             if frame is not None:
                 phases,phase_diagnostics=detect_refined_phases(swing.points,swing.valid,phase_inputs,swing.fps,
                                                               club_confidence,frame,source)
@@ -1263,6 +1485,14 @@ def process(
                 # Retain uncertain tail instead of clipping before corrected contact.
                 phases.follow_through=max(phases.follow_through or 0,min(swing.frames-1,corrected+round(.5*swing.fps)))
     print(f"Phases: {phases.as_dict()}", flush=True)
+    late_start = phase_diagnostics.get('clip_starts_after_top')
+    if late_start and reviewed_positions is None:
+        message = (f"The clip starts at or after the top of the backswing: the hands are highest on frame "
+                   f"{late_start['highest_hands_frame']} and only fall afterwards (lowest on frame "
+                   f"{late_start['lowest_hands_frame']}). Address, P2 and P3 are not in the video, so P1-P10 cannot "
+                   f"be identified. Use a clip that starts before the takeaway, or supply --positions-json.")
+        print(f"ERROR: {message}", flush=True)
+        raise ClipCoverageError(message)
     if phase_diagnostics.get('impact_source'):
         print(f"P7 source: {phase_diagnostics['impact_source']} (window {phase_diagnostics.get('impact_window')})", flush=True)
     skeleton_check = {"skipped": "no swing window"}
@@ -1337,8 +1567,8 @@ def process(
     still = folder / f"{video.stem}_3d.jpg"
     arrays = folder / f"{video.stem}_3d.npz"
     summary = folder / f"{video.stem}_3d.json"
-    written = render_video(video, swing, poses, saved, still, phases, ball["p1_xy"])
-    stills = save_position_stills(video, swing, checkpoints, folder, phases, ball["p1_xy"])
+    written = render_video(video, swing, poses, saved, still, phases, ball["p1_xy"], frame_overlay=frame_overlay)
+    stills = save_position_stills(video, swing, checkpoints, folder, phases, ball["p1_xy"], frame_overlay=frame_overlay)
 
     np.savez_compressed(
         arrays,
@@ -1432,6 +1662,7 @@ def process(
                 "position_stills": stills,
                 "ball": ball,
                 "impact_contact": contact,
+                "clip_trim": clip_trim,
                 "p4_face": p4_face,
                 "p7_face": p7_face,
                 "projected_wrist_deg": {

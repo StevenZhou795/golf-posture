@@ -56,7 +56,7 @@ cd J:\Golf_Posture
 | 视频 | `runs/workflows/videos/<视频名>_<时间戳>/` | `runs/golfpose_workflow/videos/<视频名>_<时间戳>/` |
 | 评分 | `runs/workflows/scores/<视频运行名>/` | `runs/golfpose_workflow/scores/<视频运行名>/` |
 
-每个完成的视频运行包含 `P1.jpg`–`P10.jpg`、`P1_3d.jpg`–`P10_3d.jpg`、`identified_frames.npz/json`、完整序列 `<stem>_3d.npz`、识别依据 `<stem>_3d.json`、`skeleton_diagnostics.json` 和渲染视频 `<stem>_3d.avi`。只有十个帧号互不相同、递增且 3D 姿态全为有限值时才算完成，并更新该工作流的最新结果指针。
+每个完成的视频运行包含 `P1.jpg`–`P10.jpg`、`P1_3d.jpg`–`P10_3d.jpg`、击球前后两帧对照 `P7_contact.jpg`、`identified_frames.npz/json`、完整序列 `<stem>_3d.npz`、识别依据 `<stem>_3d.json`、`skeleton_diagnostics.json` 和渲染视频 `<stem>_3d.avi`。只有十个帧号互不相同、递增且 3D 姿态全为有限值时才算完成，并更新该工作流的最新结果指针。
 
 对指定的运行评分：
 

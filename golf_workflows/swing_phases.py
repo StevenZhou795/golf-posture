@@ -28,6 +28,8 @@ RELIABLE_CLUB_CONFIDENCE = 0.3
 ARM_PROGRESS_AT_SHAFT_PARALLEL = 0.3
 IMPACT_BEFORE_HANDS_SECONDS = 0.1
 IMPACT_AFTER_HANDS_SECONDS = 0.3
+# Hands highest within this time of the first frame means the clip starts at the top.
+CLIP_START_TOP_SECONDS = 0.1
 
 
 @dataclass
@@ -321,6 +323,14 @@ def detect_refined_phases(points, valid, filled, fps, confidence=None, impact_hi
         result=detect_phases(club*scale,None,fps)
         if result.impact is not None: result.follow_through=n-1
         details.update(fallback='no_corroborated_wrist_rise_and_return',finish_reason='clip_end_uncertain')
+        # Hands already at their highest on the first frames and only falling
+        # afterwards: recording began at or after the top, so P1-P3 are absent.
+        if len(troughs):
+            first_low=int(troughs[0])
+            highest=int(np.argmax(height[:first_low+1]))
+            if highest<=max(2,int(round(CLIP_START_TOP_SECONDS*fps))) and height[highest]-height[first_low]>=.5*span:
+                details['clip_starts_after_top']=dict(highest_hands_frame=highest,lowest_hands_frame=first_low,
+                    drop_torso=round(float(height[highest]-height[first_low]),2))
         return result,details
     _,top,wrist_impact=max(candidates)
     wrist_top=top

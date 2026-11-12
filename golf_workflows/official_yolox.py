@@ -285,8 +285,12 @@ class OfficialClubDetector:
         return box, details
 
 
-def select_box(result, label=0, minimum_score=.25, previous=None):
-    """Highest-confidence finite box, retaining an overlapping golfer across frames."""
+def select_box(result, label=0, minimum_score=.25, previous=None, require_overlap=False):
+    """Highest-confidence finite box, retaining an overlapping golfer across frames.
+
+    With `require_overlap`, a frame where no box overlaps `previous` is a miss
+    rather than a jump to another person (a bystander can outscore the golfer).
+    """
     boxes = np.asarray(result["boxes"], dtype=float).reshape(-1, 4)
     scores = np.asarray(result["scores"], dtype=float)
     indexes = np.flatnonzero((np.asarray(result["labels"]) == label) & np.isfinite(scores)
@@ -304,6 +308,8 @@ def select_box(result, label=0, minimum_score=.25, previous=None):
         matching = indexes[overlaps >= .1]
         if len(matching):
             indexes = matching
+        elif require_overlap:
+            return None, None
     chosen = int(indexes[np.argmax(scores[indexes])])
     return boxes[chosen].copy(), float(scores[chosen])
 

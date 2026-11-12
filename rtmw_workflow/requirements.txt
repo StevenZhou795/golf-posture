@@ -1,0 +1,10 @@
+# Shared golf pipeline; install in this workflow's own environment.
+# SwingTrace uses the existing pinned Ultralytics detector, without its path-filling package.
+-c constraints.txt
+-r ../requirements.txt
+mmengine==0.10.7
+mmcv-lite==2.1.0
+# MMPose is loaded from the pinned official source by scripts/setup.ps1.
+# Only RTMW's pure PyTorch modules are imported (no training/evaluation extras).
+json-tricks==3.17.3
+munkres==1.1.4

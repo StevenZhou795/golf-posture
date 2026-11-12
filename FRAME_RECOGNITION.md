@@ -117,11 +117,16 @@
 - 相机可能在准备到击球之间平移或缩放（010 中球位移动了约 46 像素）。因此第一次在准备球位 0.5 躯干长度内检测到球时，重新确定球位，之后逐帧跟随；球在当前球位 0.12 躯干长度以内即视为“在原位”。重新确定的球位记录在 `impact_contact.ball_spot`。
 
 **判定**（`contact_frame`，只在第 5 节的 P7 窗口内）：
-1. **球离开原位**（`ball_departure`）：球先被看到在原位，此后从某一帧起再也不在原位，这一帧记为 `ball_departure_frame`。触球帧杆头会挡住球，所以击球帧是“消失帧”或其前一帧，取杆头离球更近的那一帧。若两帧的杆头都不在球旁 0.6 躯干长度以内（杆头模糊、手腕丢失或检测错误），标记 `clubhead_unconfirmed`，再按击球前的接近速度外推：取消失前最后两帧连续检测到的杆头到球距离，若杆头正在接近且已在 1.2 躯干长度以内，到达时刻 = 帧号 + 距离 ÷ 每帧接近量（`clubhead_reaches_ball_at`），四舍五入后限定在这两帧之内。无法外推时，取球最后一次停在原位的那一帧。
+1. **球离开原位**（`ball_departure`）：球先被看到在原位，此后从某一帧起再也不在原位，这一帧记为 `ball_departure_frame`。触球帧杆头会挡住球，所以击球帧是“消失帧”或其前一帧，取杆头离球更近的那一帧。若两帧的杆头都不在球旁 0.6 躯干长度以内（杆头模糊、手腕丢失或检测错误），标记 `clubhead_unconfirmed`，再按击球前的接近速度外推：取消失前最后两帧连续检测到的杆头到球距离，若杆头正在接近且已在 1.2 躯干长度以内，到达时刻 = 帧号 + 距离 ÷ 每帧接近量（`clubhead_reaches_ball_at`），四舍五入后限定在这两帧之内。无法外推时，改用图像中的运动杆头（`clubhead_motion`）：在球位上下 0.35、左右 2.5 躯干长度的地面带内，找同时与顶点帧（杆在上方、球在原位）和另一帧都不同的像素（灰度差 > 25），去掉球位本身，保留面积 ≥ 0.012 躯干长度² 的块，记录每帧最近一块到球位的距离（`clubhead_motion_torso`）。脚和阴影在顶点到击球之间会变，但相邻两帧之间不变，因此被排除。消失帧上杆头仍在球旁 0.5 躯干长度以内时取消失帧（`clubhead_motion_choice`，008：0.09 → 215；010：0.09 → 168），否则取球最后一次停在原位的那一帧（w03：杆头已离开地面带，0.75 → 38）。
 2. **杆头到达球**：没有可用的离开事件时，取杆头离球最近的帧，距离须 ≤ 0.6 躯干长度。杆头优先用检测到的杆颈（`clubhead_at_ball`）；没检测到时用球杆跟踪器推算的杆颈，并加 0.1 躯干长度的惩罚（`tracked_clubhead_at_ball`）。击球瞬间杆头最快、最模糊，常常只有跟踪结果。
 3. 都不满足时，回到第 5 节的动作捕捉规则。
 
 得到的帧作为提示重新运行第 5 节；落在 P7 窗口内才接受（`ball_impact_hint_accepted`）。逐帧的球是否在原位、杆头到球距离及其来源记录在 `impact_contact`。
+
+**触球落在两帧之间**：30 fps 左右时，一号木杆头每帧移动 1 米以上，触球常常发生在“最后停留帧”和“消失帧”之间，两帧都没有杆头贴球的画面。
+- 记录 `contact_between`（这两帧）和 `contact_captured`（其中是否有杆头在球旁 0.6 躯干长度以内）。
+- 两帧在球位附近的裁剪并排存为 `P7_contact.jpg`，被选为 P7 的一侧标注 `= P7`；并按容器时间戳记录两帧真实间隔与丢帧数（`impact_contact.bracket`）。可变帧率的录屏可能恰好在击球处丢帧。
+- 未拍到触球时打印警告，说明 P7 取了哪一帧。
 
 `ball.p7_clubhead_distance_px` 是 P7 时杆颈检测到准备球位的像素距离。正常应在几十像素以内；几百像素说明杆颈检测有误（如 008），此时 P7 由球离开原位决定。
 
@@ -183,6 +188,16 @@ P9 的补充说明：
 
 正常情况下，2D 检测阶段已经会自动纠正漂移的人体裁剪框（在上一帧骨架范围和球手 ROI 中重试），所以这个检查拦下的是纠正后仍然无法恢复的情况。
 
+检查之前还有两道防护：
+- **人物选择以球手 ROI 为起点**：只跟随与上一帧框重叠的人物，不会跳到分数更高的旁观者身上（009 的保安 0.950 分，球手 0.939 分）。
+- **片尾裁掉**：视频末尾一段几乎没有人物检测（分数 ≥ 0.25 的帧不超过 10%）且长于缺口上限时，先裁掉再识别（`clip_trim`）。片尾卡片上的假骨架不会被算成“丢失球手”。
+- **视频从顶点之后开始**：双手在开头 0.1 秒内最高、之后只下降时，P1–P3 不在视频中，以 `ClipCoverageError` 中止（`phase_detection.clip_starts_after_top`）。
+
+中止时按以下顺序排查：
+1. 看 `skeleton_diagnostics.json` 中丢失段的帧，判断是遮挡、裁剪框漂移、旁观者还是片尾。
+2. 若双手高度在整段视频中几乎不变，或 `handedness_detection.top_frame` 落在片尾，骨架很可能不在球手身上。
+3. 若是旁观者或裁剪问题，用 `--golfer-box` 指定球手所在区域。
+
 ## 9. 回退与人工覆盖
 
 - 关闭球杆 refinement（`--no-club-refinement`）时，使用旧的杆头/手腕速度规则确定阶段，再用旧的逐个贪心规则选位置。两个工作流默认都开启 refinement。
@@ -196,7 +211,8 @@ P9 的补充说明：
 | `positions` | P1–P10 帧号（从 0 开始） |
 | `phases`、`phase_detection` | P1/P4/P7/送杆结束，以及 `top_source`、`address_source`、`wrist_impact`、`impact_source`、`impact_window`、`ball_impact_hint_accepted` 等依据 |
 | `ball` | 准备球位与 `p7_clubhead_distance_px` |
-| `impact_contact` | P7 证据：`ball_spot`、`ball_departure_frame`、`ball_presence`、`clubhead_distance_px`、`clubhead_unconfirmed`、`clubhead_reaches_ball_at` |
+| `clip_trim` | 是否裁掉了没有球手的片尾，以及使用的帧范围 |
+| `impact_contact` | P7 证据：`ball_spot`、`ball_departure_frame`、`ball_presence`、`clubhead_distance_px`、`clubhead_unconfirmed`、`clubhead_reaches_ball_at`、`clubhead_motion_torso`、`clubhead_motion_choice`、`contact_between`、`contact_captured`、`bracket`（`P7_contact.jpg`、`interval_ms`、`dropped_frames`） |
 | `checkpoint_selection.selector` | `joint_dp`（联合选取）或旧规则 |
 | `checkpoint_selection.position_confidence` | 每个位置的置信度 |
 | `checkpoint_selection.subframe_frames` / `subframe_ms` | 亚帧时间 |
@@ -212,6 +228,6 @@ P9 的补充说明：
   - `python -m golf_workflows.benchmark evaluate <运行目录>` 计算每个位置偏离标注的帧数和毫秒数。
   - `python -m golf_workflows.benchmark replay --out <目录>` 用已保存的 2D 重新跑识别，不重跑 2D 模型。
 - 这些都是针对单次挥杆的启发式规则，不是训练出来的阶段分类模型；一段视频里有多次挥杆时，只取手部落差最大的一次。
-- 30 fps 左右时，击球前后相邻帧之间杆身可转过 60° 以上，P5–P8 的帧级误差至少 ±1 帧；亚帧时间可以部分弥补这一点。
+- 30 fps 左右时，击球前后相邻帧之间杆身可转过 60° 以上，P5–P8 的帧级误差至少 ±1 帧；亚帧时间可以部分弥补这一点。现有七段视频中有四段（008、010、w01、w03）根本没有拍到触球那一帧（`contact_captured` 为假），只能取最接近的帧。
 - 前导臂被身体遮挡时（如 w09 第 33 帧），P9 会在相邻两帧之间摇摆。
 - 上杆顶点附近球杆常常模糊或出画，P4 经常只能退回到手腕峰值。

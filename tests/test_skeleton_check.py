@@ -4,7 +4,8 @@ from pathlib import Path
 
 import numpy as np
 
-from golf_workflows.golf_pose_3d import SkeletonQualityError, Swing2D, check_skeleton, skeleton_lost_frames
+from golf_workflows.golf_pose_3d import (SkeletonQualityError, Swing2D, check_skeleton, skeleton_lost_frames,
+                                         trailing_absence, trim_swing)
 
 
 def _swing(valid, fps=30.0):
@@ -38,6 +39,17 @@ class SkeletonCheckTests(unittest.TestCase):
         valid = np.ones((3, 19), dtype=bool)
         valid[1, [13, 16]] = False
         self.assertEqual(skeleton_lost_frames(valid).tolist(), [False, True, False])
+
+    def test_outro_without_golfer_is_trimmed(self):
+        # 009: golfer scored ~0.93 until frame 419, then an end card with low-score blips.
+        swing = _swing(np.ones((120, 19), dtype=bool))
+        scores = [.93] * 90 + [None] * 10 + [.3] * 3 + [None] * 17
+        swing.detector_details = [dict(frame_index=i, body=dict(selected_person_score=s)) for i, s in enumerate(scores)]
+        self.assertEqual(trailing_absence(swing), 90)
+        trimmed = trim_swing(swing, 90)
+        self.assertEqual((trimmed.frames, len(trimmed.points), len(trimmed.detector_details)), (90, 90, 90))
+        swing.detector_details = [dict(frame_index=i, selected_golfer_score=.9) for i in range(115)] + [None] * 5
+        self.assertIsNone(trailing_absence(swing))  # 5 frames is within the gap limit
 
 
 if __name__ == "__main__":
