@@ -23,6 +23,7 @@ class DetectorPoseTests(unittest.TestCase):
         pose = Mock(metadata={'pose_backend': 'yolo26n-pose'})
         def infer(frame, **kwargs):
             keypoints = torch.tensor([[[10., 20., .9]] * 17])
+            keypoints[0, :, 1] += torch.arange(17) * 4
             return [Results(frame, path='', names={0: 'person'}, boxes=torch.tensor([[0., 0., 100., 100., .9, 0.]]),
                             keypoints=keypoints)]
         pose.predict.side_effect = infer
@@ -141,8 +142,12 @@ class DetectorPoseTests(unittest.TestCase):
         detector.predict = Mock(return_value=dict(boxes=np.empty((0, 4)), scores=np.empty(0),
             labels=np.empty(0, dtype=np.int64), inference_seconds=.01))
         pose = Mock(metadata={'pose_backend': 'yolo26n-pose'})
-        pose.predict.side_effect = lambda frame, **kwargs: [Results(frame, path='', names={0: 'person'},
-            boxes=torch.tensor([[0., 0., 10., 10., .9, 0.]]), keypoints=torch.tensor([[[1., 2., .9]] * 17]))]
+        def infer(frame, **kwargs):
+            points = torch.tensor([[[1., 2., .9]] * 17])
+            points[0, :, 1] += torch.arange(17) * 4
+            return [Results(frame, path='', names={0: 'person'},
+                boxes=torch.tensor([[0., 0., 10., 70., .9, 0.]]), keypoints=points)]
+        pose.predict.side_effect = infer
         body = YOLOXBodyPose(pose, detector)
         frame = np.zeros((200, 300, 3), np.uint8)
         result, _ = body.predict_frame(frame)

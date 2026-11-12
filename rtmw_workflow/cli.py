@@ -6,6 +6,7 @@ import traceback
 
 from .runtime import HERE, ROOT, CHECKPOINT
 from .report import write_json
+from .device import resolve_devices, move_detector, StagedLifter
 
 
 def inputs(args):
@@ -45,7 +46,7 @@ def load_components(args):
     return dict(body=body, detector=detector, model=model,
         lifter=shared.load_lifter(shared.CHECKPOINT),
         club=SwingTraceClub(args.club_checkpoint,
-            'cpu' if getattr(args, 'pose_device', 'cpu') == 'cuda' else args.club_device), ball=ball,
+            'cpu'), ball=ball,
         roi=roi)
 
 
@@ -58,13 +59,32 @@ def run_video(video, folder, components, args):
     body.records = []
     body.replay_results = None
     components['club'].reset()
+    aux_device = getattr(args, 'aux_device', 'cpu')
     if args.golfer_box is not None:
         body.set_initial_golfer_box(args.golfer_box)
     else:
-        roi, details = auto_golfer_roi(video, components['roi'])
+        try:
+            move_detector(components['roi'], aux_device)
+            roi, details = auto_golfer_roi(video, components['roi'])
+        finally:
+            move_detector(components['roi'], 'cpu')
         body.set_initial_golfer_box(roi, 'auto-yolo26n', details)
     stages = {}
+    lifter = components['lifter']
+    lifter_device = getattr(args, 'lifter_device', 'cpu')
+    if lifter_device == 'cuda':
+        def before_lift():
+            import torch
+            components['club'].set_device('cpu')
+            components['club'].metadata['inference_device'] = args.club_device
+            move_detector(components['ball'], 'cpu')
+            components['detector'].model.to('cpu')
+            torch.cuda.empty_cache()
+            print('Stage 3: MixSTE GPU FP32', flush=True)
+        lifter = StagedLifter(lifter, lifter_device, before_lift)
     try:
+        components['detector'].model.to(aux_device)
+        components['detector'].metadata['inference_device'] = aux_device
         if getattr(args, 'pose_device', 'cpu') == 'cuda':
             import torch
             if not torch.cuda.is_available():
@@ -82,12 +102,14 @@ def run_video(video, folder, components, args):
                 stages['body_seconds'] = time.perf_counter()-start
             finally:
                 components['model'].to('cpu')
+                components['detector'].model.to('cpu')
                 torch.cuda.empty_cache()
-            components['club'].set_device(args.club_device)
+        components['club'].set_device(getattr(args, 'club_device', 'cpu'))
+        move_detector(components['ball'], aux_device)
         start = time.perf_counter()
         print('Stage 2: original full golf pipeline', flush=True)
         sequence = SwingTraceSequence(body, components['club'])
-        process(video, sequence, None, components['lifter'],
+        process(video, sequence, None, lifter,
             handedness=args.handedness, view=args.view, ball_model=components['ball'],
             club_refinement=True, output_folder=folder,
             club_pose_model=components['club'], allow_skeleton_gaps=False,
@@ -97,6 +119,13 @@ def run_video(video, folder, components, args):
                                          'missing_direction': 'unobserved'}))
         stages['golf_pipeline_seconds'] = time.perf_counter()-start
     finally:
+        if isinstance(lifter, StagedLifter):
+            lifter.release()
+        components['club'].set_device('cpu')
+        components['club'].metadata['inference_device'] = getattr(args, 'club_device', 'cpu')
+        move_detector(components['ball'], 'cpu')
+        components['detector'].model.to('cpu')
+        components['model'].to('cpu')
         body.save_raw(folder)
         components['club'].save(folder)
         write_json(folder/'stage_timing.json', stages)
@@ -119,9 +148,15 @@ def main(argv=None):
         from .swingtrace import CHECKPOINT as CLUB_CHECKPOINT
         p.add_argument('--club-checkpoint', type=Path, default=CLUB_CHECKPOINT)
         p.add_argument('--cpu-threads', '--pose-cpu-threads', type=int, default=8)
-        p.add_argument('--club-device', choices=['cpu', 'cuda'], default='cpu',
+        p.add_argument('--device', choices=['auto', 'cpu', 'cuda'], default='auto',
+                       help='Common device for all neural models; auto prefers CUDA')
+        p.add_argument('--aux-device', choices=['cpu', 'cuda'],
+                       help='YOLOX, golfer ROI and golf ball device; defaults to --device')
+        p.add_argument('--lifter-device', choices=['cpu', 'cuda'],
+                       help='MixSTE 3D device; defaults to --device')
+        p.add_argument('--club-device', choices=['cpu', 'cuda'],
                        help='SwingTrace detector device (FP32)')
-        p.add_argument('--pose-device', choices=['cpu', 'cuda'], default='cpu',
+        p.add_argument('--pose-device', choices=['cpu', 'cuda'],
                        help='cuda: stage FP32 body predictions before the club pipeline')
         if name == 'batch':
             p.add_argument('--resume', action='store_true', help='Continue an existing batch; preserve interrupted attempts')
@@ -135,6 +170,10 @@ def main(argv=None):
     args = parser.parse_args(argv)
     if args.cpu_threads < 1:
         parser.error('--cpu-threads must be positive')
+    try:
+        resolve_devices(args)
+    except RuntimeError as exc:
+        parser.error(str(exc))
     if args.command == 'self-test':
         from .scripts.self_test import run
         return run(args)
@@ -172,6 +211,7 @@ def main(argv=None):
     report = dict(workflow='rtmw', status='initializing', club_device=args.club_device,
                   club_backend='swingtrace-yolo11m', club_checkpoint=str(args.club_checkpoint.resolve()),
                   pose_device=args.pose_device, pose_backend='rtmw-x-2d', pose_checkpoint=str(args.checkpoint.resolve()),
+                  aux_device=args.aux_device, lifter_device=args.lifter_device,
                   precision='float32', input_count=len(videos), results=[])
     if resume:
         import json
@@ -182,7 +222,9 @@ def main(argv=None):
             parser.error('Cannot resume a different body model/checkpoint; use a new output directory')
         completed = {Path(r['video']).resolve() for r in report['results']}
         videos = [v for v in videos if v not in completed]
-        report.update(status='initializing', current_video=None)
+        report.update(status='initializing', current_video=None,
+                      pose_device=args.pose_device, club_device=args.club_device,
+                      aux_device=args.aux_device, lifter_device=args.lifter_device)
     overall_started = time.perf_counter()
     write_json(out/'batch_summary.json', report)
     try:

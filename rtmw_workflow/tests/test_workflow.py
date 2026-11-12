@@ -45,10 +45,11 @@ class AdapterTests(unittest.TestCase):
                      [SimpleNamespace(pred_instances=prediction(.1, 40))]]
         # Force the first candidate to need a retry while still winning by score.
         with patch('rtmw_workflow.official.inference', side_effect=responses), \
+             patch.object(body, '_target_pose', side_effect=lambda boxes, points: (boxes, points)), \
              patch.object(body, '_quality', side_effect=[(False, 15.), (False, 2.)]):
             result, _ = body.predict_frame(np.zeros((200, 300, 3), np.uint8))
         self.assertEqual(result.keypoints.data.shape, (1, 17, 3))
-        np.testing.assert_allclose(body.current[0][0], [115., 65.])
+        np.testing.assert_allclose(body.current[0][0], [100., 50.])
         np.testing.assert_allclose(result.keypoints.data[0, :, 2], .9)
         self.assertEqual(body.current[0].shape, (133, 2))
 
@@ -72,6 +73,19 @@ class AdapterTests(unittest.TestCase):
             self.assertEqual(body.predict('empty.mp4'), [])
         set_threads.assert_called_once_with(6)
         capture.release.assert_called_once()
+
+    def test_rejected_identity_is_not_saved_as_wholebody_prediction(self):
+        body = self.backend()
+        body.last_body_box = np.array([100., 50., 200., 150.])
+        body.last_body_keypoints = np.tile([150., 90., .9], (17, 1))
+        body.lock_anchor = np.array([150., 90., 100.])
+        with patch('rtmw_workflow.official.inference', return_value=[SimpleNamespace(pred_instances=prediction())]), \
+             patch.object(body, '_target_pose', side_effect=lambda boxes, points: (boxes[:0], points[:0])):
+            result, _ = body.predict_frame(np.zeros((200, 300, 3), np.uint8))
+        self.assertIsNone(body.current)
+        self.assertEqual(len(result.keypoints), 0)
+        self.assertTrue(result.detector_details['target_locked'])
+        np.testing.assert_array_equal(body.last_body_box, [100., 50., 200., 150.])
 
     def test_nan_confidence_and_missing_frames(self):
         p = prediction()
@@ -190,7 +204,8 @@ class PipelineTests(unittest.TestCase):
 
     def test_original_process_called_without_rule_overrides(self):
         body = Mock(metadata={})
-        components = dict(body=body, lifter=object(), club=Mock(), detector=object(), ball=object(), model=object())
+        components = dict(body=body, lifter=object(), club=Mock(metadata={}),
+                          detector=Mock(metadata={}), ball=Mock(overrides={}), model=Mock())
         args = SimpleNamespace(golfer_box=[1, 2, 30, 40], handedness='auto', view='auto')
         with tempfile.TemporaryDirectory() as tmp, \
              patch('golf_workflows.golf_pose_3d.process') as shared, \

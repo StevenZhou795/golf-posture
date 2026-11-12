@@ -198,7 +198,8 @@ def _decode(outputs, score_threshold: float, iou_threshold: float, scale: float)
     boxes, scores, labels = [], [], []
     for stride, (cls_score, bbox_pred, objectness) in zip(STRIDES, outputs):
         _, _, height, width = cls_score.shape
-        yy, xx = torch.meshgrid(torch.arange(height), torch.arange(width), indexing="ij")
+        yy, xx = torch.meshgrid(torch.arange(height, device=bbox_pred.device),
+                               torch.arange(width, device=bbox_pred.device), indexing="ij")
         prior = torch.stack((xx, yy), dim=-1).reshape(-1, 2).to(bbox_pred) * stride
         pred = bbox_pred.permute(0, 2, 3, 1).reshape(-1, 4)
         center = pred[:, :2] * stride + prior
@@ -250,6 +251,7 @@ class OfficialClubDetector:
     @torch.inference_mode()
     def predict(self, frame: np.ndarray) -> dict:
         tensor, scale = _prepare(frame)
+        tensor = tensor.to(next(self.model.parameters()).device)
         started = perf_counter()
         boxes, scores, labels = _decode(self.model(tensor), self.score_threshold, 0.65, scale)
         height, width = frame.shape[:2]
@@ -286,10 +288,10 @@ class OfficialClubDetector:
 
 
 def select_box(result, label=0, minimum_score=.25, previous=None, require_overlap=False):
-    """Highest-confidence finite box, retaining an overlapping golfer across frames.
+    """Choose by continuity when anchored, otherwise by detection confidence.
 
-    With `require_overlap`, a frame where no box overlaps `previous` is a miss
-    rather than a jump to another person (a bystander can outscore the golfer).
+    With `require_overlap`, reject incompatible displacement/scale as well as
+    missing overlap instead of jumping to a higher-confidence bystander.
     """
     boxes = np.asarray(result["boxes"], dtype=float).reshape(-1, 4)
     scores = np.asarray(result["scores"], dtype=float)
@@ -305,9 +307,21 @@ def select_box(result, label=0, minimum_score=.25, previous=None, require_overla
         intersection = wh.prod(axis=1)
         union = (candidates[:, 2:] - candidates[:, :2]).prod(axis=1) + np.prod(previous[2:] - previous[:2]) - intersection
         overlaps = intersection / np.maximum(union, 1e-6)
-        matching = indexes[overlaps >= .1]
+        size = candidates[:, 2:] - candidates[:, :2]
+        reference_size = np.maximum(np.asarray(previous[2:]) - previous[:2], 1.)
+        displacement = np.linalg.norm(
+            ((candidates[:, :2] + candidates[:, 2:] - previous[:2] - previous[2:]) / 2)
+            / reference_size, axis=1)
+        scale = size / reference_size
+        compatible = (overlaps >= .1)
+        if require_overlap:
+            compatible &= (displacement <= .6) & (scale.min(axis=1) >= .45) & (scale.max(axis=1) <= 2.)
+        matching = indexes[compatible]
         if len(matching):
-            indexes = matching
+            # Confidence breaks ties; it must not override identity continuity.
+            affinity = overlaps - .35 * displacement + .05 * scores[indexes]
+            chosen = int(indexes[np.where(compatible, affinity, -np.inf).argmax()])
+            return boxes[chosen].copy(), float(scores[chosen])
         elif require_overlap:
             return None, None
     chosen = int(indexes[np.argmax(scores[indexes])])

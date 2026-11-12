@@ -1239,12 +1239,21 @@ def trailing_absence(swing: Swing2D) -> int | None:
     The person detector must stay below GOLFER_PRESENT_SCORE from that frame to
     the end of the clip, for longer than the skeleton gap limit. The pose model
     still returns partial skeletons on such frames, so the skeleton alone
-    cannot tell an end card from a lost golfer.
+    cannot tell an end card from a lost golfer. An identity-confirmed locked
+    track is independent presence evidence when the person box is rejected.
     """
     scores = golfer_detection_scores(swing)
     if scores is None:
         return None
     present = scores >= GOLFER_PRESENT_SCORE
+    lost = skeleton_lost_frames(swing.valid)
+    for index, row in enumerate(swing.detector_details):
+        if not isinstance(row, dict):
+            continue
+        body = row.get('body') if isinstance(row.get('body'), dict) else row
+        if (body.get('target_locked') is True and body.get('tracking_status') == 'confirmed'
+                and body.get('skeleton_usable') is True and not lost[index]):
+            present[index] = True
     if not present.any():
         return None
     max_gap = max(3, int(round(SKELETON_MAX_GAP_SECONDS * swing.fps)))

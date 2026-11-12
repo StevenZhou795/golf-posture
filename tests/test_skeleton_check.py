@@ -51,6 +51,23 @@ class SkeletonCheckTests(unittest.TestCase):
         swing.detector_details = [dict(frame_index=i, selected_golfer_score=.9) for i in range(115)] + [None] * 5
         self.assertIsNone(trailing_absence(swing))  # 5 frames is within the gap limit
 
+    def test_locked_golfer_survives_person_box_misses_during_downswing(self):
+        swing = _swing(np.ones((53, 19), dtype=bool))
+        swing.detector_details = [dict(body=dict(selected_person_score=.9 if i < 33 else None,
+            target_locked=True, tracking_status='confirmed', skeleton_usable=True)) for i in range(53)]
+        self.assertIsNone(trailing_absence(swing))
+
+    def test_missing_locked_track_and_unverified_skeleton_do_not_hide_outro(self):
+        for status, usable, valid in (('missing-hold-target', True, True),
+                                      ('confirmed', False, True), ('confirmed', True, False)):
+            with self.subTest(status=status, usable=usable, valid=valid):
+                swing = _swing(np.ones((53, 19), dtype=bool))
+                if not valid:
+                    swing.valid[33:] = False
+                swing.detector_details = [dict(selected_person_score=.9 if i < 33 else None,
+                    target_locked=True, tracking_status=status, skeleton_usable=usable) for i in range(53)]
+                self.assertEqual(trailing_absence(swing), 33)
+
 
 if __name__ == "__main__":
     unittest.main()

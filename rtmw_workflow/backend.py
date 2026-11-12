@@ -52,16 +52,22 @@ class RTMWBodyPose(YOLOXBodyPose):
 
     def predict_frame(self, frame, previous=None, **kwargs):
         self._crops = {}
+        had_target = self.last_body_box is not None or self.initial_golfer_box is not None or previous is not None
         result, box = super().predict_frame(frame, previous, **kwargs)
         bounds = tuple(result.detector_details['body_crop_bbox_xyxy'])
         prediction = self._crops.get(bounds)
+        if not len(result.keypoints):
+            prediction = None
         # A top-down estimator always returns a pose even on an empty frame.
         # Do not treat an unanchored full-frame prediction as a detected person.
-        if result.detector_details['selected_person_bbox_xyxy'] is None and self.initial_golfer_box is None and previous is None:
+        if result.detector_details['selected_person_bbox_xyxy'] is None and not had_target:
             prediction = None
             result.update(boxes=torch.empty((0, 6)), keypoints=torch.empty((0, 17, 3)))
             result.detector_details['skeleton_usable'] = False
-            self.last_body_box = None
+            result.detector_details['target_locked'] = False
+            result.detector_details['tracking_status'] = 'missing-uninitialized'
+            self.reset_tracking()
+            box = None
         self.current = prediction
         return result, box
 
@@ -81,7 +87,7 @@ class RTMWBodyPose(YOLOXBodyPose):
                 raise ValueError('Video has no valid FPS')
             self.predictor.dataset.fps = float(fps)
             previous = self.initial_golfer_box
-            self.last_body_box = None
+            self.reset_tracking()
             self.records = []
             try:
                 while True:

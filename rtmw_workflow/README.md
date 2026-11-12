@@ -2,6 +2,14 @@
 
 使用 **RTMW-X 2D** 权重 `models/rtmw-x_simcc-cocktail14_pt-ucoco_270e-256x192-13a2546d_20231208.pth` 预测普通视频中的人体：YOLOX 人物框 → RTMW 2D 人体 + **SwingTrace YOLO11m 杆身／杆头／握把框** → 球检测与球杆跟踪 → MixSTE 17+2 → 原有 P1–P10 规则。当前入口不加载 RTMW3D、球杆 ViTPose 或球杆分割模型。选帧定义和阈值见根目录 `FRAME_RECOGNITION.md`；检测框的适配与逐帧依据见本目录 [FRAME_RULES.md](FRAME_RULES.md)。
 
+## 人物锁定与裁切
+
+初始定位优先使用自动或手动球手 ROI，避免检测框截掉前景球手而包含后方观众。确认完整骨架后，按该骨架范围加边距裁切；YOLOX 候选按重叠、位置和尺度连续性选择，置信度只作辅助。头肩、髋部的逐帧位移和首次锁定的髋部位置共同限制身份切换，防止高置信度的观众骨架或混合骨架污染跟踪状态。
+
+检测漏失时保留已确认的目标区域；恢复候选也必须通过同一身份检查。无法确认时输出缺失，保留锁定状态，不自动换人；被拒绝的姿态不会写入 133 点结果。每段视频开始时清空锁定。此策略面向机位稳定的单次挥杆，目标大幅离开初始位置时可能保留缺失。`wholebody.json` 的逐帧记录新增 `target_locked`、`tracking_status`，锁定裁切标记为 `locked-body-roi`。
+
+本次修改仅依据最近导出的 `20261111_162017_138561/008` 画面与记录做静态审查；未重新运行推理或测试，效果尚待复跑验证。
+
 ## 安装与自检
 
 在仓库根目录使用 Windows PowerShell，推荐 Python 3.12：
@@ -21,7 +29,7 @@ powershell -ExecutionPolicy Bypass -File rtmw_workflow/scripts/setup.ps1 -Cuda
 .\rtmw_workflow\.venv\Scripts\python.exe -m rtmw_workflow batch --input-dir pro_refs --club-device cuda
 ```
 
-`--club-device cuda` 将 SwingTrace 球杆检测放到 GPU，使用 FP32、640 输入、每帧一次全图预测；RTMW 的设备由 `--pose-device` 单独控制。默认均为 CPU。CUDA 不可用时明确报错。当前已完成接入自检，尚未运行 SwingTrace 的完整视频质量或速度验证；旧 ViTPose 计时不代表新模型性能。
+`--device auto` 为默认值，CUDA 可用时优先将六个神经网络模型放到 GPU，否则使用 CPU。`--device cuda` 强制 GPU，CUDA 不可用时明确报错；`--device cpu` 强制 CPU。`--pose-device`、`--club-device`、`--aux-device` 和 `--lifter-device` 可分别覆盖人体、SwingTrace、辅助检测与 MixSTE 的设备。SwingTrace 保留 FP32、640 输入、每帧一次全图预测。尚未运行完整视频速度对比；旧 ViTPose 计时不代表新模型性能。
 
 官方 MMPose 固定提交：`759b39c13fea6ba094afc1fa932f51dc1b11cbf9`。2D X 配置为 `rtmw-x_8xb704-270e_cocktail14-256x192.py`，输入宽 192、高 256，输出 COCO-WholeBody 133 点；保留官方 `flip_test=True`。加载使用 `strict=True`，已核验 836 项权重完全匹配。现有独立环境即可运行，无需重新安装依赖。
 
@@ -52,7 +60,7 @@ Windows CPU 使用 `mmcv-lite`。`official.py` 仅加载该模型需要的官方
 
 `--checkpoint` 指定其他兼容 X 权重；`--golfer-box X1 Y1 X2 Y2` 指定原图像素中的球手区域。默认自动选 ROI，并使用已有 YOLOX 连续性与骨架恢复机制。YOLO26n 只用于初始 ROI，不融合或补充人体关节。
 
-默认 CPU、8 线程，`--view` 和 `--handedness` 默认为 `auto`。输出目录必须为空或不存在，避免覆盖已有结果。默认使用北京时间批次名：`rtmw_workflow/outputs/<批次>/<视频名>/`。
+默认自动优先 CUDA，CPU 部分使用 8 线程；`--view` 和 `--handedness` 默认为 `auto`。输出目录必须为空或不存在，避免覆盖已有结果。默认使用北京时间批次名：`rtmw_workflow/outputs/<批次>/<视频名>/`。
 
 ## 输出与坐标
 
@@ -93,16 +101,18 @@ Windows CPU 使用 `mmcv-lite`。`official.py` 仅加载该模型需要的官方
 
 `self-test` 覆盖三类别 ID、多人关联、漏检、不可信框拒绝、手动球位置、原有选帧/球杆/骨架回归；同时严格加载 RTMW 2D 权重，在同一张合成图的两个平移框上验证坐标还原，再做 SwingTrace 单张合成图推理。当前报告为 `outputs/self_test_rtmw2d.json`。`check` 会读取 005 的一帧，只有明确需要该检查时才运行。
 
-## GPU 分阶段 FP32
+## GPU 分阶段 FP32（默认优先 CUDA）
 
 ```powershell
-.\rtmw_workflow\.venv\Scripts\python.exe -m rtmw_workflow video pro_refs/005.mp4 --pose-device cuda --club-device cuda --cpu-threads 6
+.\rtmw_workflow\.venv\Scripts\python.exe -m rtmw_workflow video pro_refs/005.mp4 --device cuda --cpu-threads 4
 ```
 
-先在 GPU 上推理所有人体帧并缓存 CPU 结果，再将人体模型移回 CPU，使用 GPU 运行球杆与原有选帧流程，避免同时在显存驻留两个大模型。两模型均保留 FP32。`stage_timing.json` 保存阶段耗时；`run_status.json` 的 `seconds` 包含人体阶段、原流程及输出，不包含共享模型初始化。
+先用 GPU 计算初始人物 ROI 并卸载 ROI 模型；随后 YOLOX 与 RTMW 在 GPU 上逐帧推理人体，缓存 CPU 结果后卸载人体模型和 YOLOX。第二阶段使用 GPU 运行 SwingTrace 与 YOLOE 球检测；进入 3D 提升时先卸载两者，再将 MixSTE 放到 GPU。每段结束或推理出错后将模型移回 CPU，下一段重新按阶段调度。所有模型保留 FP32，适用于本机 4GB 显存。视频解码、图像预处理、绘图、规则计算和文件输出仍使用 CPU，因此 CPU 占用不会归零。`stage_timing.json` 保存阶段耗时；`run_status.json` 的 `seconds` 包含人体阶段、原流程及输出，不包含共享模型初始化。
 
 `batch --resume --output-dir <原批次目录>` 跳过已完成条目，并保留中断尝试。仅可续跑相同 RTMW 2D 权重和 SwingTrace 的批次；旧 RTMW3D 或 ViTPose 批次须使用新目录。旧后台批次已停止。
 
 `--club-checkpoint models/swingtrace-yolo11m.pt` 可指定同类权重；`--ball-position X Y` 指定原图中球的放置位置，省去准备阶段球位置搜索，但触球/球离开仍需独立图像证据。默认用现有 YOLOE 自动寻找球。
 
 参考：[RTMW 论文](https://arxiv.org/html/2407.08634v1)、[官方 RTMPose3D](https://github.com/open-mmlab/mmpose/tree/main/projects/rtmpose3d)。
+
+设备调度验证：2026-11-12 在 Quadro T2000 4GB 上使用合成输入完成六模型 CUDA 推理；RTMW 阶段 PyTorch 峰值分配约 974 MiB，MixSTE 约 502 MiB。这不包含桌面和 CUDA 上下文占用，也不是完整视频速度或质量验证。
